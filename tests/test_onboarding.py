@@ -85,10 +85,10 @@ def test_existing_file_declined_writes_nothing_and_force_overwrites(tmp_path, ke
     code, _, checked = _run(Script("n"), target)
     assert code == 1 and target.read_text() == "old" and checked == []
     code, _, _ = _run(happy(key_file), target, force=True)
-    assert code == 0 and "old" not in target.read_text()
+    assert code == 0 and target.read_text().startswith("default_account")
     target.write_text("old")
     code, _, _ = _run(Script("y", *happy(key_file).answers), target)
-    assert code == 0 and "old" not in target.read_text()
+    assert code == 0 and target.read_text().startswith("default_account")
 
 
 def test_group_readable_key_is_rejected_with_the_chmod_hint(tmp_path, key_file):

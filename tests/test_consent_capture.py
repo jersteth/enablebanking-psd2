@@ -40,7 +40,7 @@ def test_listener_captures_and_ignores_wrong_path():
     statuses = []
 
     def hit():
-        for _ in range(100):  # wait until the server is listening
+        for _ in range(400):  # wait (up to ~4 s, slow CI runners) until the server is listening
             try:
                 urllib.request.urlopen(f"http://127.0.0.1:{port}/other")
             except urllib.error.HTTPError as e:
@@ -48,6 +48,8 @@ def test_listener_captures_and_ignores_wrong_path():
                 break
             except urllib.error.URLError:
                 time.sleep(0.01)
+        else:
+            raise AssertionError("the listener never started")
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/callback?code=c1&state=s1") as r:
             body = r.read()
             statuses.append(r.status)
