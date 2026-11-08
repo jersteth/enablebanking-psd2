@@ -1,6 +1,6 @@
 {"aspsps": [
-  {"name": "KBC", "country": "BE", "maximum_consent_validity": 15552000, "psu_types": ["personal", "business"]},
+  {"name": "KBC", "country": "BE", "bic": "KREDBEBB", "maximum_consent_validity": 15552000, "psu_types": ["personal", "business"]},
   {"name": "KBC Brussels", "country": "BE", "maximum_consent_validity": 15552000, "psu_types": ["personal"]},
   {"name": "Belfius", "country": "BE", "maximum_consent_validity": 7776000, "psu_types": ["personal"], "required_psu_headers": ["Psu-Ip-Address", "Psu-User-Agent"]},
-  {"name": "ING", "country": "BE", "psu_types": ["personal"]}
+  {"name": "ING", "country": "BE", "psu_types": ["personal"], "beta": true}
 ]}

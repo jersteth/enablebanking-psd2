@@ -73,3 +73,9 @@ Refs: `requirements.md` (R1–R8), `design.md`. Mark tasks `[x]` when done and t
 - [x] V15 Setup guide: sample output matches (2 transactions, IBAN column); "Invalid URL" and two troubleshooting wordings marked unverified; `callback_timeout` added to the config table.
 - Deferred to 003: export paths outside `exports/` (V12), Ctrl+C outside `_execute` (V13), API `code` field (V14), undocumented minor interface deviations (V16), missing tests for the verbose hook, a 401 on `get_session`, and no PSU headers on `GET /sessions` (V17).
 - Ignored: listener port-in-use and IPv6 (V8, V18; paste mode is the default), Retry-After edge cases (V9), string `remittance_information` (V10).
+
+## Minor Interface Deviations (V16, recorded during 003)
+- PSU headers are also sent on `POST /sessions` (the design said `/auth` and AIS data calls only).
+- `Account.raw`, `Session.raw` and `Aspsp.psu_types` were dropped as unused. `Aspsp.required_psu_headers` was added (fix 7); `bic`/`beta` were added in 003.
+- `capture_paste(timeout, prompt_fn)` argument order (design: `prompt_fn, timeout`). `StepReporter` has `info()`/`notice()` and no `start()`.
+- `run_demo` took injectable `store`/`hooks`/`now`; `render_transactions(txns, width)` instead of `(txns, summary, account)`. Both superseded by the 003 command layer.

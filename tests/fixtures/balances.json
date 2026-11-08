@@ -1,0 +1,7 @@
+{"balances": [
+  {"name": "Booked balance", "balance_amount": {"currency": "EUR", "amount": "1234.56"}, "balance_type": "CLBD",
+   "reference_date": "2026-11-07", "last_change_date_time": "2026-11-07T23:59:59Z"},
+  {"name": "Available", "balance_amount": {"currency": "EUR", "amount": "1100.00"}, "balance_type": "ITAV",
+   "reference_date": "2026-11-08"},
+  {"balance_amount": {"currency": "EUR", "amount": "-5.00"}, "balance_type": "ZZZZ"}
+]}

@@ -1,6 +1,10 @@
 # Copy to config.toml (git-ignored) and fill in.
 # Precedence: CLI flag > environment variable > this file > default.
 
+# Account used when a command gets no --account. TOML rule: top-level keys like this one must come
+# BEFORE the first [section], otherwise they belong to that section.
+default_account = "main"
+
 [enablebanking]
 # Application ID from the Enable Banking control panel (= file name of the downloaded .pem).
 # env EB_APP_ID, flag --app-id
@@ -20,17 +24,26 @@ redirect_url = "https://localhost/callback"
 # (unattended access, which banks may cap at 4 requests per day). env EB_PSU_IP, flag --psu-ip
 # psu_ip_address = "203.0.113.10"
 
-[demo]
-# Exact bank (ASPSP) name as listed by Enable Banking; `psd2-demo check` suggests candidates.
-# env EB_BANK_NAME, flag --bank
+# Accounts: one table per account. The name after "accounts." is what --account takes.
+# bank_name must be the exact Enable Banking name (`psd2-demo banks --filter <text>` lists them).
+# Each must be linked to the application in the control panel.
+[accounts.main]
 bank_name = "KBC"
-
-# env EB_BANK_COUNTRY, flag --country (default BE)
-bank_country = "BE"
-
-# Account to read. Must be linked to the application. env EB_IBAN, flag --iban
 iban = "BE68 5390 0754 7034"
+# bank_country = "BE"          # default BE
 
+# [accounts.savings]
+# bank_name = "KBC"            # same bank as main: one consent covers both
+# iban = "BE71 0961 2345 6769"
+
+# The 002 single-account form still works and becomes the account named "demo":
+# [demo]
+# bank_name = "KBC"
+# iban = "BE68 5390 0754 7034"
+# Ad hoc, without config: --bank KBC --iban BE68... (or env EB_BANK_NAME + EB_IBAN) overrides the selection.
+
+[demo]
+# Consent settings (the section name is kept from 002).
 # auto | paste | listener. env EB_CAPTURE_MODE, flag --capture (default auto)
 capture_mode = "auto"
 
@@ -40,3 +53,9 @@ consent_days = 1
 
 # Seconds to wait for the bank redirect. env EB_CALLBACK_TIMEOUT, flag --callback-timeout (default 300)
 callback_timeout = 300
+
+# Used by `psd2-demo history` (spec 004).
+[history]
+days = 30              # env EB_HISTORY_DAYS
+include = []           # any of "balances", "details", "raw"; env EB_HISTORY_INCLUDE (comma-separated)
+max_age = 60           # minutes a cached account result stays fresh; env EB_HISTORY_MAX_AGE

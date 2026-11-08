@@ -27,6 +27,11 @@ def test_status_mapping():
     assert type(plain) is errors.ApiError and plain.hint is None
 
 
+def test_gone_codes_are_not_found():
+    assert isinstance(errors.from_response(_resp(400, {"error": "SESSION_NOT_FOUND"})), errors.ApiNotFound)
+    assert type(errors.from_response(_resp(400, {"error": "WRONG_REQUEST"}))) is errors.ApiError
+
+
 def test_known_error_hint():
     err = errors.from_response(_resp(403, {"message": "denied", "error": "ACCESS_DENIED"}))
     assert "not linked" in err.hint
@@ -36,3 +41,10 @@ def test_known_error_hint():
 def test_non_json_body():
     err = errors.from_response(_resp(500, text="<html>oops</html>"))
     assert "oops" in err.message
+
+
+def test_code_shown_when_different_from_status():
+    err = errors.from_response(_resp(400, {"code": 4221, "message": "bad", "error": "WRONG_REQUEST"}))
+    assert err.code == 4221 and "code=4221" in err.describe()
+    same = errors.from_response(_resp(401, {"code": 401, "message": "Invalid JWT"}))
+    assert "code=" not in same.describe()

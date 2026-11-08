@@ -2,6 +2,9 @@
 
 import httpx
 
+# Error codes meaning "the resource is already gone"; reported as ApiNotFound like a 404.
+GONE_ERRORS = {"SESSION_NOT_FOUND", "ALREADY_CLOSED"}
+
 ERROR_HINTS = {
     "ACCESS_DENIED": "consent denied or account not linked to the application",
     "ASPSP_ERROR": "bank-side error; retry later",
@@ -14,22 +17,22 @@ class ApiError(Exception):
     default_hint: str | None = None
 
     def __init__(self, status: int, method: str, endpoint: str, *, message: str | None = None,
-                 detail=None, error: str | None = None):
+                 detail=None, error: str | None = None, code: int | str | None = None):
         self.status = status
+        self.code = code
         self.method = method
         self.endpoint = endpoint
         self.message = message or f"HTTP {status}"
         self.detail = detail
         self.error = error
+        self.hint: str | None = ERROR_HINTS.get(error) or self.default_hint  # callers may refine it
         super().__init__(f"{method} {endpoint} failed: {self.message}")
-
-    @property
-    def hint(self) -> str | None:
-        return ERROR_HINTS.get(self.error) or self.default_hint
 
     def describe(self) -> str:
         parts = [f"status={self.status}"] if self.status else []
         parts.append(f"endpoint={self.method} {self.endpoint}")
+        if self.code is not None and self.code != self.status:
+            parts.append(f"code={self.code}")
         if self.error:
             parts.append(f"error={self.error}")
         if self.detail:
@@ -71,6 +74,7 @@ def from_response(resp: httpx.Response) -> ApiError:
         body = {"detail": body}
     status = resp.status_code
     cls = (ApiAuthError if status in (401, 403) else ApiRateLimited if status == 429
-           else ApiNotFound if status == 404 else ApiServerError if status >= 500 else ApiError)
+           else ApiNotFound if status == 404 or body.get("error") in GONE_ERRORS
+           else ApiServerError if status >= 500 else ApiError)
     return cls(status, resp.request.method, resp.request.url.path, message=body.get("message"),
-               detail=body.get("detail"), error=body.get("error"))
+               detail=body.get("detail"), error=body.get("error"), code=body.get("code"))

@@ -1,25 +1,27 @@
-"""Demo step orchestration."""
+"""Step orchestration: the shared session step (bank → consent or reuse → account) and step bodies."""
 
 from __future__ import annotations
 
 import sys
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from enum import Enum
-from typing import Callable, TextIO
+from typing import Callable, Literal, TextIO
 
 from psd2demo import consent
 from psd2demo import iban as iban_mod
-from psd2demo.config import Config
+from psd2demo.config import AccountSpec, Config
 from psd2demo.eb.client import EnableBankingClient
 from psd2demo.eb.errors import ApiAuthError, ApiError, ApiNotFound
-from psd2demo.eb.models import Account, Aspsp
-from psd2demo.errors import AccountNotFound, BankNotFound, DemoError
-from psd2demo.session_store import SessionStore, StoredSession, iban_hash
+from psd2demo.eb.models import Account, Aspsp, TransactionsPage
+from psd2demo.errors import AccountNotFound, BankNotFound, ConfigError, DemoError, UsageError
+from psd2demo.session_store import BankMeta, SessionRecord, SessionStore, StoredAccount, iban_hash
 from psd2demo.transactions import Summary, Txn, normalize, sort_txns, summarize
 
-LOOKBACK_DAYS = 10
+DEFAULT_LOOKBACK_DAYS = 10
 REUSE_MIN_REMAINING = timedelta(minutes=5)
+RANGE_HINT = ("the bank may limit history (often 90 days without a new SCA): "
+              "shorten the range or rerun with --fresh")
 
 
 class Step(Enum):
@@ -28,6 +30,10 @@ class Step(Enum):
     CONSENT = "CONSENT"
     ACCOUNT = "ACCOUNT"
     TRANSACTIONS = "TRANSACTIONS"
+    BALANCES = "BALANCES"
+    DETAILS = "DETAILS"
+    SESSIONS = "SESSIONS"
+    REVOKE = "REVOKE"
     EXPORT = "EXPORT"
 
 
@@ -39,6 +45,15 @@ class StepRecord:
     name: str
     ok: bool
     detail: str
+
+
+@dataclass
+class CommandResult:
+    ok: bool
+    failed_step: Step | None = None
+    exit_code: int = EXIT_OK
+    summary: dict = field(default_factory=dict)  # JSON-safe after json.dumps(default=str)
+    render: Callable[[], str] | None = None  # human output for stdout
 
 
 class StepReporter:
@@ -64,25 +79,18 @@ class StepReporter:
         self.steps.append(StepRecord(step.value, True, detail))
         self._print(f"[✓] {step.value:<12} {detail}".rstrip())
 
-    def fail(self, step: Step, err: DemoError | ApiError) -> RunResult:
+    def fail(self, step: Step, err: DemoError | ApiError, *, summary: dict | None = None,
+             render: Callable[[], str] | None = None) -> CommandResult:
+        """Report a failed step. Config and usage errors exit 2, everything else 1; ``summary``/``render``
+        keep partial output (e.g. a table whose export failed)."""
         self.steps.append(StepRecord(step.value, False, err.message))
         self._print(f"[✗] {step.value:<12} {err.message}")
         if isinstance(err, ApiError):
             self.info(err.describe())
         if err.hint:
             self.info(f"hint: {err.hint}")
-        return RunResult(ok=False, failed_step=step, exit_code=EXIT_CONFIG if step is Step.CONFIG else EXIT_FAIL)
-
-
-@dataclass
-class RunResult:
-    ok: bool
-    failed_step: Step | None = None
-    exit_code: int = EXIT_OK
-    summary: dict = field(default_factory=dict)
-    txns: list[Txn] = field(default_factory=list)
-    totals: dict[str, Summary] = field(default_factory=dict)
-    raw_pages: list[dict] = field(default_factory=list)
+        return CommandResult(ok=False, failed_step=step, summary=summary or {}, render=render,
+                             exit_code=EXIT_CONFIG if isinstance(err, (ConfigError, UsageError)) else EXIT_FAIL)
 
 
 @dataclass
@@ -98,6 +106,45 @@ def default_capture(cfg: Config) -> str:
     return consent.capture_paste(cfg.callback_timeout)
 
 
+@dataclass
+class Context:
+    """Everything a command needs. ``step`` tracks the running step so one handler can report failures."""
+    cfg: Config
+    client: EnableBankingClient
+    store: SessionStore
+    reporter: StepReporter
+    hooks: ConsentHooks
+    today: date
+    now: datetime
+    step: Step = Step.CONFIG
+    base_psu_headers: dict[str, str] = field(init=False)  # every PSU header we could send
+
+    def __post_init__(self):
+        self.base_psu_headers = dict(self.client.psu_headers)
+
+
+@dataclass(frozen=True)
+class AccountSession:
+    account: AccountSpec
+    record: SessionRecord
+    uid: str
+    reused: bool
+
+
+@dataclass
+class TxnResult:
+    pages: list[TransactionsPage]
+    txns: list[Txn]
+    totals: dict[str, Summary]
+
+
+class ConsentRequired(DemoError):
+    def __init__(self, account: AccountSpec):
+        super().__init__(f"consent required for account {account.name!r} ({account.bank_name})",
+                         hint=f"psd2-demo authorize --account {account.name}")
+        self.account = account
+
+
 def find_bank(client: EnableBankingClient, name: str, country: str) -> Aspsp:
     aspsps = client.get_aspsps(country)
     wanted = name.casefold()
@@ -109,13 +156,14 @@ def find_bank(client: EnableBankingClient, name: str, country: str) -> Aspsp:
     raise BankNotFound(name, country, candidates[:10])
 
 
-def describe_validity(seconds: int | None) -> str:
-    if not seconds:
+def describe_validity(bank: Aspsp) -> str:
+    if not bank.max_consent_days:
         return "max consent validity not published"
-    return f"max consent validity {seconds // 86400} days"
+    return f"max consent validity {bank.max_consent_days} days"
 
 
-def select_psu_headers(available: dict[str, str], required: list[str]) -> tuple[dict[str, str], list[str]]:
+def select_psu_headers(available: dict[str, str], required: list[str] | tuple[str, ...]
+                       ) -> tuple[dict[str, str], list[str]]:
     """Enable Banking rejects a partial set: send every required PSU header, or none.
 
     Returns the headers to send and the required headers that are missing.
@@ -125,115 +173,133 @@ def select_psu_headers(available: dict[str, str], required: list[str]) -> tuple[
     return ({} if missing else available), missing
 
 
-def _bank_step(cfg: Config, client: EnableBankingClient, reporter: StepReporter) -> Aspsp:
-    bank = find_bank(client, cfg.bank_name, cfg.bank_country)
-    reporter.ok(Step.BANK, f"{bank.name} ({bank.country}), {describe_validity(bank.maximum_consent_validity)}")
-    if bank.required_psu_headers:
-        reporter.info("bank requires PSU headers: " + ", ".join(bank.required_psu_headers))
-    client.psu_headers, missing = select_psu_headers(client.psu_headers, bank.required_psu_headers)
-    if missing:
-        reporter.info(f"not configured: {', '.join(missing)} -> sending no PSU headers (unattended access; "
-                      "banks may allow only 4 such requests per day). Set psu_ip_address to fix.")
+def bank_for(ctx: Context, account: AccountSpec) -> Aspsp:
+    """BANK step: look the bank up and apply its PSU header rule to the client."""
+    ctx.step = Step.BANK
+    bank = find_bank(ctx.client, account.bank_name, account.bank_country)
+    ctx.reporter.ok(Step.BANK, f"{bank.name} ({bank.country}), {describe_validity(bank)}")
+    _apply_psu(ctx, bank.required_psu_headers)
     return bank
 
 
-def run_check(cfg: Config, client: EnableBankingClient, reporter: StepReporter) -> RunResult:
-    try:
-        bank = _bank_step(cfg, client, reporter)
-    except (DemoError, ApiError) as exc:
-        return reporter.fail(Step.BANK, exc)
-    return RunResult(ok=True, summary={"bank": bank.name, "country": bank.country,
-                                       "maximum_consent_validity": bank.maximum_consent_validity})
+def _apply_psu(ctx: Context, required) -> None:
+    if required:
+        ctx.reporter.info("bank requires PSU headers: " + ", ".join(required))
+    ctx.client.psu_headers, missing = select_psu_headers(ctx.base_psu_headers, required)
+    if missing:
+        ctx.reporter.info(f"not configured: {', '.join(missing)} -> sending no PSU headers (unattended access; "
+                          "banks may allow only 4 such requests per day). Set psu_ip_address to fix.")
 
 
-def _try_reuse(cfg: Config, client: EnableBankingClient, store: SessionStore, bank: Aspsp,
-               now: datetime) -> StoredSession | None:
-    stored = store.load()
-    if stored is None or not stored.matches(cfg.app_id, bank.name, bank.country, cfg.iban):
+def _masked(a: Account) -> str:
+    return iban_mod.mask(iban_mod.normalize(a.iban))
+
+
+def _usable(ctx: Context, rec: SessionRecord | None, iban: str) -> str | None:
+    """The account uid if ``rec`` is still usable for ``iban`` (local validity, then GET /sessions)."""
+    uid = rec.account_uid(iban) if rec else None
+    if not uid or not rec.valid_at(ctx.now, REUSE_MIN_REMAINING):
         return None
     try:
-        status = client.get_session(stored.session_id)
+        status = ctx.client.get_session(rec.session_id)
     except (ApiAuthError, ApiNotFound):
-        status = None
-    if (status is None or status.status != "AUTHORIZED" or status.valid_until is None
-            or status.valid_until <= now + REUSE_MIN_REMAINING or stored.account_uid not in status.account_uids):
-        store.clear()
         return None
-    return stored
+    if (status.status != "AUTHORIZED" or status.valid_until is None
+            or status.valid_until <= ctx.now + REUSE_MIN_REMAINING or uid not in status.account_uids):
+        return None
+    return uid
 
 
-def _select_account(cfg: Config, accounts: list[Account]) -> Account:
-    for acc in accounts:
-        if acc.iban and iban_mod.normalize(acc.iban) == cfg.iban:
-            return acc
-    listing = [f"{iban_mod.mask(iban_mod.normalize(a.iban)) if a.iban else '(no IBAN)'} "
-               f"{a.name or '-'} {a.currency or ''}".strip() for a in accounts]
-    raise AccountNotFound(iban_mod.mask(cfg.iban), listing)
-
-
-def run_demo(cfg: Config, client: EnableBankingClient, reporter: StepReporter, *, fresh: bool = False,
-             store: SessionStore | None = None, hooks: ConsentHooks | None = None,
-             today: date | None = None, now: datetime | None = None) -> RunResult:
-    store = store or SessionStore(cfg.state_dir / "session.json")
-    hooks = hooks or ConsentHooks(capture=default_capture)
-    today = today or date.today()
-    now = now or datetime.now(timezone.utc)
-    masked = iban_mod.mask(cfg.iban)
-    date_from, date_to = today - timedelta(days=LOOKBACK_DAYS), today
-
-    step = Step.BANK
+def _consent(ctx: Context, bank: Aspsp, consent_days: int | Literal["max"] | None
+             ) -> tuple[SessionRecord, list[Account]]:
+    """Interactive consent at the bank; stores one record covering every account the user authorized."""
+    cfg, client, reporter = ctx.cfg, ctx.client, ctx.reporter
+    days = consent_days or cfg.consent_days
+    if consent_days == "max":
+        days = None if bank.maximum_consent_validity else cfg.consent_days  # None: the bank's maximum
+    state = consent.new_state()
+    valid_until = consent.compute_valid_until(ctx.now, days, bank.maximum_consent_validity)
+    auth = client.start_auth(bank, valid_until=valid_until, state=state, redirect_url=cfg.redirect_url)
+    reporter.notice("approve access at your bank in the browser; if it does not open, visit:")
+    reporter.notice(auth.url)
+    ctx.hooks.open_browser(auth.url)
+    if cfg.capture_mode == "listener":
+        reporter.notice(f"waiting for the bank redirect on {cfg.redirect_url} ...")
+    session = client.create_session(consent.parse_callback(ctx.hooks.capture(cfg), state))
+    record = SessionRecord(
+        session_id=session.session_id, app_id=cfg.app_id, bank_name=bank.name, bank_country=bank.country,
+        accounts=tuple(StoredAccount(a.uid, iban_hash(a.iban), _masked(a), a.name, a.currency, a.cash_account_type)
+                       for a in session.accounts if a.iban),
+        valid_until=session.valid_until.isoformat() if session.valid_until else "",
+        created_at=ctx.now.isoformat(),
+        bank=BankMeta(bank.maximum_consent_validity, tuple(bank.required_psu_headers)))
     try:
-        bank = _bank_step(cfg, client, reporter)
+        ctx.store.upsert(record)
+    except OSError as exc:
+        reporter.notice(f"warning: session not saved ({exc.strerror or exc}); "
+                        f"the next run will need a new consent. Check {ctx.store.path.parent}")
+    reporter.ok(Step.CONSENT, f"new session valid until {record.valid_until or 'unknown'}")
+    return record, session.accounts
 
-        step = Step.CONSENT
-        stored = None if fresh else _try_reuse(cfg, client, store, bank, now)
-        if stored:
-            reporter.ok(Step.CONSENT, f"reused session valid until {stored.valid_until}")
-            reporter.ok(Step.ACCOUNT, f"{masked} (uid {stored.account_uid})")
-        else:
-            state = consent.new_state()
-            valid_until = consent.compute_valid_until(now, cfg.consent_days, bank.maximum_consent_validity)
-            auth = client.start_auth(bank, valid_until=valid_until, state=state, redirect_url=cfg.redirect_url)
-            reporter.notice("approve access at your bank in the browser; if it does not open, visit:")
-            reporter.notice(auth.url)
-            hooks.open_browser(auth.url)
-            if cfg.capture_mode == "listener":
-                reporter.notice(f"waiting for the bank redirect on {cfg.redirect_url} ...")
-            session = client.create_session(consent.parse_callback(hooks.capture(cfg), state))
-            session_valid_until = session.valid_until.isoformat() if session.valid_until else ""
-            reporter.ok(Step.CONSENT, f"new session valid until {session_valid_until or 'unknown'}")
 
-            step = Step.ACCOUNT
-            account = _select_account(cfg, session.accounts)
-            stored = StoredSession(session_id=session.session_id, app_id=cfg.app_id, bank_name=bank.name,
-                                   bank_country=bank.country, iban_sha256=iban_hash(cfg.iban),
-                                   account_uid=account.uid, valid_until=session_valid_until,
-                                   created_at=now.isoformat())
-            try:
-                store.save(stored)
-            except OSError as exc:
-                reporter.notice(f"warning: session not saved ({exc.strerror or exc}); "
-                                f"the next run will need a new consent. Check {store.path.parent}")
-            reporter.ok(Step.ACCOUNT, f"{masked} {account.name or '-'} {account.currency or ''}".rstrip()
-                        + f" (uid {account.uid})")
+def ensure_session(ctx: Context, account: AccountSpec, *, interactive: bool = True, fresh: bool = False,
+                   consent_days: int | Literal["max"] | None = None) -> AccountSession:
+    """BANK → CONSENT (reuse the bank's session, or a new consent if interactive) → ACCOUNT.
 
-        step = Step.TRANSACTIONS
-        pages = list(client.iter_transactions(stored.account_uid, date_from, date_to))
-    except (DemoError, ApiError) as exc:
-        return reporter.fail(step, exc)
+    ``consent_days``: None uses the config value, "max" the bank's maximum validity.
+    """
+    masked = iban_mod.mask(account.iban)
+    # Reuse first: a stored record carries the bank's limits and PSU rule, so GET /aspsps is only needed
+    # for a new consent (or a record migrated from 002 without bank metadata).
+    rec = ctx.store.for_bank(ctx.cfg.app_id, account.bank_name, account.bank_country)
+    if not fresh and rec and rec.bank:
+        ctx.step = Step.BANK
+        ctx.reporter.ok(Step.BANK, f"{rec.bank_name} ({rec.bank_country}), from the stored session")
+        _apply_psu(ctx, rec.bank.required_psu_headers)
+        bank = None
+    else:
+        bank = bank_for(ctx, account)
 
+    ctx.step = Step.CONSENT
+    uid = None if fresh else _usable(ctx, rec, account.iban)
+    if uid:
+        ctx.reporter.ok(Step.CONSENT, f"reused session valid until {rec.valid_until}")
+        ctx.reporter.ok(Step.ACCOUNT, f"{account.name} {masked} (uid {uid})")
+        return AccountSession(account, rec, uid, reused=True)
+    if not interactive:
+        raise ConsentRequired(account)
+    bank = bank or bank_for(ctx, account)
+    ctx.step = Step.CONSENT
+
+    rec, session_accounts = _consent(ctx, bank, consent_days)
+    ctx.step = Step.ACCOUNT
+    match = next((a for a in session_accounts if a.iban and iban_mod.normalize(a.iban) == account.iban), None)
+    if match is None:
+        listing = [f"{_masked(a) if a.iban else '(no IBAN)'} {a.name or '-'} {a.currency or ''}".strip()
+                   for a in session_accounts]
+        raise AccountNotFound(masked, listing)
+    ctx.reporter.ok(Step.ACCOUNT, f"{account.name} {masked} {match.name or '-'} {match.currency or ''}".rstrip()
+                    + f" (uid {match.uid})")
+    return AccountSession(account, rec, match.uid, reused=False)
+
+
+def run_transactions(ctx: Context, a: AccountSession, date_from: date, date_to: date) -> TxnResult:
+    ctx.step = Step.TRANSACTIONS
+    try:
+        pages = list(ctx.client.iter_transactions(a.uid, date_from, date_to))
+    except ApiError as exc:
+        if exc.status in (400, 422) and exc.hint is None:
+            exc.hint = RANGE_HINT
+        raise
     txns = sort_txns([normalize(t, date_from, date_to) for p in pages for t in p.transactions])
     detail = (f"{len(txns)} transactions" if txns else "no transactions in range") + \
         f" {date_from.isoformat()}..{date_to.isoformat()}, {len(pages)} page(s)"
     if pages and pages[-1].truncated:
         detail += " (truncated: page limit reached)"
-    reporter.ok(Step.TRANSACTIONS, detail)
+    ctx.reporter.ok(Step.TRANSACTIONS, detail)
+    return TxnResult(pages, txns, summarize(txns))
 
-    totals = summarize(txns)
-    summary = {
-        "bank": bank.name, "country": bank.country, "iban_masked": masked,
-        "date_from": date_from.isoformat(), "date_to": date_to.isoformat(), "count": len(txns),
-        "totals": {cur: {"count": s.count, "credits": s.credits, "debits": s.debits, "net": s.net}
-                   for cur, s in totals.items()},
-    }
-    return RunResult(ok=True, summary=summary, txns=txns, totals=totals, raw_pages=[p.raw for p in pages])
+
+def totals_json(totals: dict[str, Summary]) -> dict:
+    return {cur: {"count": s.count, "credits": s.credits, "debits": s.debits, "net": s.net}
+            for cur, s in totals.items()}

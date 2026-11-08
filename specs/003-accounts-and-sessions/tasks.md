@@ -2,14 +2,14 @@
 
 Refs: `requirements.md` (R1–R7), `design.md`. Mark tasks `[x]` when they are implemented and their tests pass. Branch: `feature/003-accounts-and-sessions`. The 002 test suite must stay green after every task (regression gate).
 
-## Phase 1 – Accounts Config, Date Ranges, Session Store v2
+## Phase 1 – Accounts Config, Date Ranges, Session Store v2 ✅
 **Goal**: the multi-account config, range resolution and v2 store exist offline, and the existing `run` behaves exactly as in 002.
 **Verify (user)**:
 1. `pytest` passes.
 2. With your unchanged `config.toml` (`[demo]`), run `psd2-demo run`. It reuses the existing session, which is migrated in memory with no new consent, and shows the transactions.
 3. `.psd2demo/session.json` is still schema v1 (reads never write).
 
-- [ ] 1.1 `config.py`:
+- [x] 1.1 `config.py`:
   - `AccountSpec`, `HistorySettings`, and the `Config.accounts`/`default_account`/`history` fields
   - the account merge (`[accounts.*]` → legacy `[demo]` → env account → CLI account)
   - `Config.account(name)`, `Config.select(names)`
@@ -17,17 +17,17 @@ Refs: `requirements.md` (R1–R7), `design.md`. Mark tasks `[x]` when they are i
   - `FIELDS` reduced to app-level keys; an account is no longer required globally
 
   Test: `test_config.py` (extend: every source, precedence, selection rule, errors, history).
-- [ ] 1.2 Temporary adapter: `flow.run_demo`/`run_check` read `cfg.account()` instead of `cfg.bank_name`/`cfg.iban`, so 002 behaviour is kept until Phase 2. Test: the existing `test_flow_run.py`/`test_flow_check.py` pass, with fixtures switched to `make_cfg` building `accounts`.
-- [ ] 1.3 `daterange.py`: `UsageError`, `resolve_range`, and the argparse type `iso_date`. Test: `test_daterange.py` (days, from/to, defaults, from > to, future to, days < 1, invalid date string).
-- [ ] 1.4 `session_store.py` v2:
+- [x] 1.2 Temporary adapter: `flow.run_demo`/`run_check` read `cfg.account()` instead of `cfg.bank_name`/`cfg.iban`, so 002 behaviour is kept until Phase 2. Test: the existing `test_flow_run.py`/`test_flow_check.py` pass, with fixtures switched to `make_cfg` building `accounts`.
+- [x] 1.3 `daterange.py`: `UsageError`, `resolve_range`, and the argparse type `iso_date`. Test: `test_daterange.py` (days, from/to, defaults, from > to, future to, days < 1, invalid date string).
+- [x] 1.4 `session_store.py` v2:
   - `StoredAccount`, `BankMeta`, `SessionRecord` (`account_uid`, `valid_at`)
   - `SessionStore.records/for_bank/for_account/upsert/update/remove`
   - v1 → v2 migration on read (no write); write as v2; unreadable file → a `.bak` on the first write; atomic, 0600/0700
 
   Test: `test_session_store.py` (rewrite: round trip, migration, `.bak`, case-insensitive bank, remove, permissions).
-- [ ] 1.5 Adapt the `run_demo` CONSENT/ACCOUNT steps to the v2 store (`for_bank` + `account_uid`; `upsert` storing all session accounts + `BankMeta`). Test: `test_flow_run.py` (reuse via a migrated v1 file; new consent writes v2 with all accounts).
+- [x] 1.5 Adapt the `run_demo` CONSENT/ACCOUNT steps to the v2 store (`for_bank` + `account_uid`; `upsert` storing all session accounts + `BankMeta`). Test: `test_flow_run.py` (reuse via a migrated v1 file; new consent writes v2 with all accounts).
 
-## Phase 2 – Shared Session Step, Command Layer, `run`/`check` on It
+## Phase 2 – Shared Session Step, Command Layer, `run`/`check` on It ✅
 **Goal**: one `ensure_session` path and a `CommandResult` command layer. `run`/`transactions` gains date ranges and `--account`.
 **Verify (user)**:
 1. `psd2-demo check` and `psd2-demo run` behave as before.
@@ -35,31 +35,31 @@ Refs: `requirements.md` (R1–R7), `design.md`. Mark tasks `[x]` when they are i
 3. `psd2-demo run --from 2026-10-01 --to 2026-10-15` works.
 4. `psd2-demo run --days 5 --from 2026-10-01` exits 2.
 
-- [ ] 2.1 `eb/models.py` / `eb/client.py`:
+- [x] 2.1 `eb/models.py` / `eb/client.py`:
   - `Aspsp` gains `bic` and `beta`
   - new `Balance`, `AccountDetails`
   - new client calls `get_balances`, `get_account_details`, `delete_session` (non-GET retry policy), and `request_count`
   - `ApiError` keeps `code`, and `describe()` shows it when it differs from the status (V14)
 
   Test: `test_models.py`, `test_client.py`, `test_errors.py` (extend). Fixtures: `balances.json`, `details.json`.
-- [ ] 2.2 `flow.py`:
+- [x] 2.2 `flow.py`:
   - `Context`, `AccountSession`, `ConsentRequired`, and the new `Step` members
   - `ensure_session(ctx, account, interactive, fresh, consent_days)` per the design: BANK + PSU, reuse rules, a new consent storing all accounts + `BankMeta`, `consent_days=None` → the bank maximum, the save-failure warning, ACCOUNT match
   - `run_transactions(ctx, a, from, to)` with the 400/422 range hint
   - remove the old `run_demo` internals
 
   Test: `test_flow_session.py` (reuse; reuse for a second account at the same bank; stale → new consent; 401 on `get_session` → stale (V17); `interactive=False` → `ConsentRequired`; consent-days clamp; save failure), `test_flow_run.py` (adapted).
-- [ ] 2.3 `commands.py`: `CommandResult`, `COMMANDS`, plus `check` and `run`/`transactions` (range via `resolve_range`, export with the V12 notice for paths outside `exports/`). Test: `test_commands_run.py` (summary contents, range in detail, export notice).
-- [ ] 2.4 `cli.py` rewrite:
+- [x] 2.3 `commands.py`: `CommandResult`, `COMMANDS`, plus `check` and `run`/`transactions` (range via `resolve_range`, export with the V12 notice for paths outside `exports/`). Test: `test_commands_run.py` (summary contents, range in detail, export notice).
+- [x] 2.4 `cli.py` rewrite:
   - parent parsers (`common`, `account`, `consent`, `range`)
   - subcommands `run` (alias `transactions`) and `check`; default `run`
   - `main` dispatches through `COMMANDS`, uses the `{ok, failed_step, steps, summary}` envelope, and `render()`
   - `KeyboardInterrupt` around the whole body → 130 (V13); `UsageError` → 2
 
   Test: `test_cli.py` (adapted: alias, range mutual exclusion → 2, JSON purity, Ctrl+C → 130 via a monkeypatched command).
-- [ ] 2.5 `output.py`: extract the `_table(columns, rows, width, flex_col)` helper and refactor `render_transactions` onto it. Test: the golden table in `test_output.py` is unchanged.
+- [x] 2.5 `output.py`: extract the `_table(columns, rows, width, flex_col)` helper and refactor `render_transactions` onto it. Test: the golden table in `test_output.py` is unchanged.
 
-## Phase 3 – `banks`, `balances`, `accounts`
+## Phase 3 – `banks`, `balances`, `accounts` ✅
 **Goal**: the new read commands on the shared session step.
 **Verify (user)**:
 1. `psd2-demo banks --filter kbc` lists matches with BIC, max validity and required headers.
@@ -67,13 +67,13 @@ Refs: `requirements.md` (R1–R7), `design.md`. Mark tasks `[x]` when they are i
 3. `psd2-demo accounts --details` lists the session's accounts (others masked) and the flattened details.
 4. Each command with `--json` gives valid JSON.
 
-- [ ] 3.1 `banks` command + `render_banks` (sorted, filter, beta flag, max validity in days, required PSU headers; no account needed). Test: `test_commands_banks.py` (filter, sort, render golden, JSON summary, works without accounts).
-- [ ] 3.2 `balances` command + `render_balances` (type labels, unknown code raw, signed amounts, zero balances = pass, `--export`). Test: `test_commands_balances.py`.
-- [ ] 3.3 `accounts` command + `render_accounts` + `render_details` (selected account unmasked; others masked; `--details` flattening `a.b`; IBAN-like values masked except the selected account's). Test: `test_commands_accounts.py`.
-- [ ] 3.4 CLI subparsers for `banks`, `balances`, `accounts` with help examples. Test: `test_cli.py` (help, dispatch, `--account` selection, unknown account → exit 2).
-- [ ] 3.5 Multi-account end-to-end test: two accounts at one bank plus one at another, through the CLI with a mocked API. One consent covers both same-bank accounts, and the other bank triggers its own consent. Test: `test_cli_multi_account.py`.
+- [x] 3.1 `banks` command + `render_banks` (sorted, filter, beta flag, max validity in days, required PSU headers; no account needed). Test: `test_commands_banks.py` (filter, sort, render golden, JSON summary, works without accounts).
+- [x] 3.2 `balances` command + `render_balances` (type labels, unknown code raw, signed amounts, zero balances = pass, `--export`). Test: `test_commands_balances.py`.
+- [x] 3.3 `accounts` command + `render_accounts` + `render_details` (selected account unmasked; others masked; `--details` flattening `a.b`; IBAN-like values masked except the selected account's). Test: `test_commands_accounts.py`.
+- [x] 3.4 CLI subparsers for `banks`, `balances`, `accounts` with help examples. Test: `test_cli.py` (help, dispatch, `--account` selection, unknown account → exit 2).
+- [x] 3.5 Multi-account end-to-end test: two accounts at one bank plus one at another, through the CLI with a mocked API. One consent covers both same-bank accounts, and the other bank triggers its own consent. Test: `test_cli_multi_account.py`.
 
-## Phase 4 – `sessions`, Folded-in 002 Items, Docs
+## Phase 4 – `sessions`, Folded-in 002 Items, Docs ✅
 **Goal**: consent lifecycle management, the remaining 002 verify items, and updated documentation.
 **Verify (user)**:
 1. `psd2-demo sessions` lists your bank session with its live status.
@@ -81,18 +81,34 @@ Refs: `requirements.md` (R1–R7), `design.md`. Mark tasks `[x]` when they are i
 3. The next `psd2-demo run` asks for a new consent.
 4. `psd2-demo sessions prune` removes the revoked record.
 
-- [ ] 4.1 `sessions` list command + `render_sessions` (live status per record, `--offline`, masked configured IBANs). Test: `test_commands_sessions.py`.
-- [ ] 4.2 `sessions revoke` (`--account`/`--bank`/`--all`, the confirmation prompt via `prompt_stderr` unless `--yes`, 404/already-closed = success, failure isolation, exit 1 on any failure, `update(status=revoked)`). Test: `test_commands_sessions.py` (each case; no DELETE when the confirmation is declined).
-- [ ] 4.3 `sessions prune` (revoked or expired records). Test: `test_commands_sessions.py`.
-- [ ] 4.4 CLI nested subparser `sessions {list,revoke,prune}` (`list` is the default). Test: `test_cli.py`.
-- [ ] 4.5 V17 tests:
+- [x] 4.1 `sessions` list command + `render_sessions` (live status per record, `--offline`, masked configured IBANs). Test: `test_commands_sessions.py`.
+- [x] 4.2 `sessions revoke` (`--account`/`--bank`/`--all`, the confirmation prompt via `prompt_stderr` unless `--yes`, 404/already-closed = success, failure isolation, exit 1 on any failure, `update(status=revoked)`). Test: `test_commands_sessions.py` (each case; no DELETE when the confirmation is declined).
+- [x] 4.3 `sessions prune` (revoked or expired records). Test: `test_commands_sessions.py`.
+- [x] 4.4 CLI nested subparser `sessions {list,revoke,prune}` (`list` is the default). Test: `test_cli.py`.
+- [x] 4.5 V17 tests:
   - verbose HTTP hook: method, URL, status, truncation and redaction of a real httpx response in `test_log.py`
   - `GET /sessions/{id}` sends no PSU headers, in `test_client.py`
-- [ ] 4.6 Docs:
+- [x] 4.6 Docs:
   - `config.example.toml`: `[accounts.*]`, `default_account`, `[history]` keys (documented as used by 004)
   - `documentation/enablebanking-setup.md`: multiple accounts, the new commands, date ranges, sessions/revoke, and troubleshooting rows for `several accounts configured` and unknown account
   - `README.md`: the command list
   - `CLAUDE.md`: architecture (`commands.py`, `ensure_session`, store v2)
   - `documentation/index.md`
   - record the V16 minor interface deviations in `002/tasks.md`
-- [ ] 4.7 Final check: full `pytest`; `grep` for secrets and real IBANs; `.gitignore` covers `.psd2demo/` (including `session.json.bak`) and `exports/`; manual production check per the requirements.
+- [x] 4.7 Final check: full `pytest`; `grep` for secrets and real IBANs; `.gitignore` covers `.psd2demo/` (including `session.json.bak`) and `exports/`; manual production check per the requirements.
+
+## Verification Status
+- Automated: 191 offline tests pass, including the multi-account CLI end-to-end test (two banks, three accounts, one consent per bank).
+- Live API, no account data: `check`, `banks --filter nagel`, `banks --json`, and `sessions --offline` on the owner's real config and v1 session file. The config loads as account `demo`; the v1 session is found through the migration and not rewritten.
+- Production: verified by the owner on 2026-11-08 (`transactions --days 30`, `balances`, `accounts --details`, `sessions`, `sessions revoke`, and a new consent afterwards).
+
+## Design Deviations
+1. **Ad-hoc account layering:** env/CLI account values are layered on the legacy `[demo]` values, so 002's `EB_BANK_NAME` or `--bank` alone still overrides only the bank. A half-specified ad-hoc account is an error only when the merged result lacks a bank or an IBAN. The design made any half-specified flag account an error.
+2. **Display data per session account:** `StoredAccount` also stores display-only metadata captured at consent time (masked IBAN, name, currency, cash account type; never the full IBAN), so `accounts` lists the session's accounts without bank calls. Calling the bank per account would hit the PSD2 4/day unattended limit.
+3. **Accounts not matched are still stored:** a new consent's session is stored even when the target IBAN isn't in it, because it's usable for the bank's other accounts. The ACCOUNT step then fails as before. This supersedes 002 deviation 2.
+4. **Step tracking on `Context`:** failures are attributed through `Context.step`, set by each step, with one `except` per command instead of per-step wrappers. `bank_for` returns the `Aspsp`, and `BankMeta` is built at consent.
+5. **Ad-hoc values through `overrides`:** `load_config` receives the ad-hoc account values through `overrides` (`bank_name`/`bank_country`/`iban`) instead of an `account_override: AccountSpec` parameter.
+6. **`mark_revoked` instead of `update`:** `SessionStore.update` was dropped. `upsert` already replaces by bank.
+7. **`check` with several accounts:** without `--account` it falls back to the credentials-only check, the same as with no account configured (`Config.account(required=False)`). An unknown `--account` still fails with exit 2.
+8. **Reuse without the bank list:** `ensure_session` reuses a stored session without calling `GET /aspsps` when the record has `BankMeta` (limits and PSU rule). The BANK line then says "from the stored session". 002-migrated records (no metadata) still look the bank up.
+9. **Exit codes from the error type:** the exit code is derived from the error type (`ConfigError`/`UsageError` → 2, everything else → 1), not from the step. `UsageError` lives in `errors.py`. Log redaction keeps every configured account's IBAN readable (`log.set_own_ibans`, set once in `cli`) instead of a per-command target set from the flow.

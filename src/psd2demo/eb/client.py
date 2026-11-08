@@ -10,7 +10,8 @@ import httpx
 
 from psd2demo.eb import errors
 from psd2demo.eb.auth import JwtSigner
-from psd2demo.eb.models import Aspsp, AuthStart, Session, SessionStatus, TransactionsPage
+from psd2demo.eb.models import (AccountDetails, Aspsp, AuthStart, Balance, Session, SessionStatus,
+                                TransactionsPage)
 
 log = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ class EnableBankingClient:
                  sleep: Callable[[float], None] = time.sleep, event_hooks: dict | None = None):
         self._signer = signer
         self.psu_headers = psu_headers or {}  # sent on /auth, /sessions and AIS data calls
+        self.request_count = 0  # HTTP attempts made, including retries
         self._sleep = sleep
         self._http = httpx.Client(base_url=base_url, timeout=timeout, transport=transport,
                                   headers={"Accept": "application/json"}, event_hooks=event_hooks)
@@ -54,6 +56,7 @@ class EnableBankingClient:
             headers.update(self.psu_headers)
         for attempt in range(MAX_RETRIES + 1):
             resp, retry_after, reason = None, None, None
+            self.request_count += 1
             try:
                 resp = self._http.request(method, path, params=params, json=json, headers=headers)
             except httpx.TransportError as exc:
@@ -62,6 +65,8 @@ class EnableBankingClient:
                 reason = type(exc).__name__
             else:
                 if resp.is_success:
+                    if not resp.content:  # e.g. 204 on DELETE
+                        return {}
                     try:
                         return resp.json()
                     except ValueError:
@@ -106,6 +111,19 @@ class EnableBankingClient:
     def get_session(self, session_id: str) -> SessionStatus:
         path = f"/sessions/{session_id}"
         return self._parse(SessionStatus, "GET", path, self._request("GET", path))
+
+    def delete_session(self, session_id: str) -> None:
+        """Revoke the session and close the consent at the bank (not retried except on 429)."""
+        self._request("DELETE", f"/sessions/{session_id}")
+
+    def get_balances(self, account_uid: str) -> list[Balance]:
+        path = f"/accounts/{account_uid}/balances"
+        data = self._request("GET", path, psu=True)
+        return [self._parse(Balance, "GET", path, b) for b in data.get("balances") or []]
+
+    def get_account_details(self, account_uid: str) -> AccountDetails:
+        path = f"/accounts/{account_uid}/details"
+        return self._parse(AccountDetails, "GET", path, self._request("GET", path, psu=True))
 
     def get_transactions_page(self, account_uid: str, date_from: date, date_to: date,
                               continuation_key: str | None = None) -> TransactionsPage:

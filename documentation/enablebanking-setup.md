@@ -62,9 +62,10 @@ Edit `config.toml`:
 | `app_id` | the `.pem` file name (without `.pem`) | `EB_APP_ID` |
 | `key_path` | the path from step 3 (`~` is expanded) | `EB_KEY_PATH` |
 | `redirect_url` | the URL you whitelisted in step 2 | `EB_REDIRECT_URL` |
-| `bank_name` | your bank's exact name at Enable Banking (step 6 helps) | `EB_BANK_NAME` |
-| `bank_country` | `BE` (default) | `EB_BANK_COUNTRY` |
-| `iban` | the account linked in step 4; spaces are allowed | `EB_IBAN` |
+| `[accounts.<name>]` → `bank_name` | your bank's exact name at Enable Banking (`psd2-demo banks --filter <text>`) | `EB_BANK_NAME` |
+| `[accounts.<name>]` → `bank_country` | `BE` (default) | `EB_BANK_COUNTRY` |
+| `[accounts.<name>]` → `iban` | the account linked in step 4; spaces are allowed | `EB_IBAN` |
+| `default_account` | the account used without `--account`; **put it before the first `[section]`** (TOML rule) | – |
 | `capture_mode` | `auto` (default): `listener` for `http://localhost:<port>`, otherwise `paste` | `EB_CAPTURE_MODE` |
 | `consent_days` | requested consent length (default 1, capped at the bank's maximum) | `EB_CONSENT_DAYS` |
 | `callback_timeout` | seconds to wait for the bank redirect (default 300) | `EB_CALLBACK_TIMEOUT` |
@@ -74,7 +75,9 @@ Edit `config.toml`:
 - When every required header is available, all are sent, and the requests count as "you are present".
 - Otherwise none are sent, and the requests count as unattended access. That works, but under PSD2 a bank may limit it to 4 requests per day per account. The demo prints a note when this happens.
 
-Each key can also be overridden per run with a flag (`--bank`, `--iban`, …; see `psd2-demo run --help`).
+**Accounts.** Add one `[accounts.<name>]` table per account; `<name>` is what `--account` takes. With a single account you never need `--account`. The 002 form (`bank_name`/`iban` directly in `[demo]`) still works and becomes the account `demo`. `--bank` + `--iban` (or `EB_BANK_NAME` + `EB_IBAN`) define an ad-hoc account that overrides the selection. Accounts at the same bank share one consent.
+
+Each key can also be overridden per run with a flag (`--app-id`, `--psu-ip`, `--account`, …; see `psd2-demo <command> --help`).
 
 ## 6. Verify the setup
 ```bash
@@ -82,11 +85,11 @@ psd2-demo check
 ```
 It loads the config and key, signs a JWT, and lists the Belgian banks (`GET /aspsps`). It does not start a consent. Expected output:
 ```
-[✓] CONFIG       app aaaaaaaa-…, account BE68 **** **** 7034, capture=paste
+[✓] CONFIG       app aaaaaaaa-…, 1 account(s), capture=paste
 [✓] BANK         KBC (BE), max consent validity 180 days
       bank requires PSU headers: Psu-Ip-Address, Psu-User-Agent
 ```
-If the bank name doesn't match exactly, `check` prints the candidate names. Copy one into `bank_name`.
+If the bank name doesn't match exactly, `check` prints the candidate names. Copy one into `bank_name`. With several accounts, `psd2-demo check --account <name>` checks that account's bank.
 
 ## 7. First run
 ```bash
@@ -102,13 +105,13 @@ psd2-demo run          # "run" is the default: plain `psd2-demo` does the same
 
 Expected output:
 ```
-[✓] CONFIG       app aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee, account BE68 **** **** 7034, capture=paste
+[✓] CONFIG       app aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee, 1 account(s), capture=paste
 [✓] BANK         KBC (BE), max consent validity 180 days
       approve access at your bank in the browser; if it does not open, visit:
       https://tilisy.enablebanking.com/welcome?sessionid=...
 Paste the full redirect URL from the browser address bar: https://localhost/callback?code=...&state=...
 [✓] CONSENT      new session valid until 2026-11-09T11:59:00+00:00
-[✓] ACCOUNT      BE68 **** **** 7034 Zichtrekening EUR (uid 3f1c...)
+[✓] ACCOUNT      main BE68 **** **** 7034 Zichtrekening EUR (uid 3f1c...)
 [✓] TRANSACTIONS 2 transactions 2026-10-29..2026-11-08, 1 page(s)
 
 Booked      Value          Amount  Cur  Counterparty  Counterparty IBAN  Remittance             Status  Ref
@@ -128,9 +131,25 @@ Exit code `0` means every step passed. Zero transactions is also a pass ("no tra
 - `psd2-demo run --json` prints a machine-readable result to stdout instead of the tables. If a new consent is needed, the bank URL and paste prompt still appear on stderr, so stdout stays valid JSON.
 - `--verbose` logs each HTTP call (tokens, codes and other IBANs redacted).
 
-Local state: `.psd2demo/session.json` (mode 0600) stores the session ID, account UID, validity, and a SHA-256 of the IBAN. Delete it to forget the session.
+Local state: `.psd2demo/session.json` (mode 0600) holds one record per bank: the session ID, validity, the bank's consent limits, and for each authorized account its UID, a SHA-256 of the IBAN and display data (masked IBAN, name, currency); never a full IBAN. A 002 file is read as-is and converted on the next consent. An unreadable file is never overwritten silently: it is kept as `session.json.bak`.
 
-## 8. Troubleshooting
+## 8. Commands
+| Command | What it does |
+|---|---|
+| `psd2-demo run` (alias `transactions`) | transactions of one account; default the last 10 days |
+| `psd2-demo run --days 30` / `--from 2026-10-01 [--to 2026-10-15]` | another period (`--to` defaults to today; `--days` and `--from` exclude each other) |
+| `psd2-demo balances` | the account's balances with their ISO 20022 type (`CLBD` closing booked, `ITAV` interim available, …) |
+| `psd2-demo accounts [--details]` | the accounts your consent covers (others masked); `--details` adds the bank's data for the selected account |
+| `psd2-demo banks [--filter kbc] [--country BE]` | banks with BIC, maximum consent length and required PSU headers; needs no account |
+| `psd2-demo sessions [--offline]` | stored consents with local and live status |
+| `psd2-demo sessions revoke --account <name>` / `--bank <name>` / `--all [--yes]` | close the consent at the bank (`DELETE /sessions`); `--all` asks to confirm |
+| `psd2-demo sessions prune` | delete revoked or expired local records |
+
+Every command takes `--account <name>` where relevant, `--json` (machine-readable result on stdout), `--verbose`, and exits `0` (ok), `1` (a step failed), `2` (config or usage error) or `130` (interrupted). `run` and `balances` take `--export FILE`; a path outside `exports/` gets a warning, because it is not git-ignored and holds personal data.
+
+Revoking is the only command that changes anything at the bank; nothing revokes implicitly. After a revoke, the next command for that bank asks for a new consent.
+
+## 9. Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
@@ -148,6 +167,10 @@ Local state: `.psd2demo/session.json` (mode 0600) stores the session ID, account
 | `429 Too many requests` | Rate limit; under PSD2 a bank may cap access without the user present at 4 per day per account | Wait and retry later; avoid running in loops |
 | `ASPSP_ERROR` | Bank-side problem | Retry later |
 | Registration form says **"Invalid URL"** | Privacy/terms URL without `https://` (reported by third-party guides, unverified) | Enter full `https://...` URLs |
+| `several accounts configured; pass --account (one of: …)` | More than one account and no `default_account` | Pass `--account <name>`, or set `default_account` at the top of `config.toml` |
+| `unknown account 'x'; configured: …` | `--account` or `default_account` names no `[accounts.<name>]` table | Use one of the listed names. A `default_account` placed after a `[section]` belongs to that section and isn't seen: move it to the top |
+| `accounts 'a' and 'b' have the same IBAN` | One account configured twice | Remove one table |
+| `[✗] TRANSACTIONS` 400/422 with the 90-day hint | The bank limits history without a new SCA | Shorten the range, or `--fresh` for a new consent |
 | `[✗] CONFIG private key ... cannot be loaded` | Wrong file, or file corrupted or edited | Point `key_path` to the original downloaded `.pem` |
 | Warning `private key ... is readable by others` | Loose file permissions | `chmod 600 <key>` |
 

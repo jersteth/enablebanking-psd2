@@ -143,3 +143,31 @@ def test_pagination_max_pages(client):
         side_effect=lambda req: httpx.Response(200, json={"transactions": [], "continuation_key": f"k{next(keys)}"}))
     pages = list(client.iter_transactions("u1", date(2026, 1, 1), date(2026, 1, 2), max_pages=3))
     assert len(pages) == 3 and pages[-1].truncated
+
+
+@respx.mock
+def test_balances_details_and_counter(client):
+    bal = respx.get(f"{BASE}/accounts/u1/balances").respond(json=load_fixture("balances.json"))
+    respx.get(f"{BASE}/accounts/u1/details").respond(json=load_fixture("details.json"))
+    before = client.request_count
+    assert len(client.get_balances("u1")) == 3
+    assert client.get_account_details("u1").raw["currency"] == "EUR"
+    assert client.request_count == before + 2
+    assert bal.calls.last.request.headers["Psu-User-Agent"] == "test"
+
+
+@respx.mock
+def test_delete_session_empty_body_and_no_5xx_retry(client, sleeps):
+    ok = respx.delete(f"{BASE}/sessions/s1").respond(204)
+    assert client.delete_session("s1") is None and ok.call_count == 1
+    bad = respx.delete(f"{BASE}/sessions/s2").respond(503)
+    with pytest.raises(errors.ApiServerError):
+        client.delete_session("s2")
+    assert bad.call_count == 1 and sleeps == []
+
+
+@respx.mock
+def test_get_session_sends_no_psu_headers(client):
+    route = respx.get(f"{BASE}/sessions/s1").respond(json=load_fixture("session_get.json"))
+    client.get_session("s1")
+    assert "Psu-User-Agent" not in route.calls.last.request.headers

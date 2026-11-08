@@ -3,7 +3,7 @@ import json
 import pytest
 import respx
 
-from conftest import BASE, cli_args, load_fixture
+from conftest import APP_ID, BASE, PasteStdin, cli_args, load_fixture
 from psd2demo import cli
 from psd2demo.cli import parse_args
 
@@ -40,19 +40,8 @@ def api(monkeypatch, tmp_path):
     respx.get(f"{BASE}/accounts/acc-uid-1/transactions").respond(json=load_fixture("transactions_p2.json"))
     opened = []
     monkeypatch.setattr("webbrowser.open", opened.append)
-    monkeypatch.setattr("sys.stdin", _PasteStdin(auth))
+    monkeypatch.setattr("sys.stdin", PasteStdin(auth))
     return opened
-
-
-class _PasteStdin:
-    """stdin whose next line is the redirect URL carrying the state of the /auth request just made."""
-
-    def __init__(self, auth_route):
-        self.auth_route = auth_route
-
-    def readline(self):
-        state = json.loads(self.auth_route.calls.last.request.content)["state"]
-        return f"https://localhost/callback?code=C1&state={state}\n"
 
 
 @respx.mock
@@ -95,3 +84,70 @@ def test_check_json_failure(tmp_path, monkeypatch, key_file, capsys):
     result = json.loads(capsys.readouterr().out)
     assert result_code == 1 and result["ok"] is False and result["failed_step"] == "BANK"
     assert result["steps"][-1]["detail"] == "Application does not exist"
+
+
+def test_transactions_alias_and_period_flags():
+    args = parse_args(["transactions", "--days", "30", "--account", "main"])
+    assert args.cmd == "run" and args.days == 30 and args.account == "main"
+    args = parse_args(["--from", "2026-10-01", "--to", "2026-10-15"])
+    assert args.cmd == "run" and str(args.date_from) == "2026-10-01" and str(args.date_to) == "2026-10-15"
+
+
+@pytest.mark.parametrize("argv", [["run", "--days", "5", "--from", "2026-10-01"], ["run", "--from", "01/10/2026"]])
+def test_period_usage_errors_exit_2(argv, capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.main(argv)
+    assert exc.value.code == 2
+
+
+@respx.mock
+def test_days_with_to_exit_2(tmp_path, key_file, api, capsys):
+    assert cli.main(cli_args("run", key_file, "--days", "5", "--to", "2026-01-01")) == 2
+    assert "either --days" in capsys.readouterr().err
+
+
+def test_ctrl_c_exits_130(monkeypatch, capsys):
+    def _execute(args, reporter):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "_execute", _execute)
+    assert cli.main(["check"]) == 130
+    assert "interrupted" in capsys.readouterr().err
+
+
+
+
+@pytest.mark.parametrize("command", ["run", "transactions", "check", "banks", "balances", "accounts", "sessions",
+                                     "sessions revoke"])
+def test_subcommand_help_and_dispatch(command, capsys):
+    with pytest.raises(SystemExit) as exc:
+        parse_args([*command.split(), "--help"])
+    assert exc.value.code == 0 and "Examples:" in capsys.readouterr().out
+    assert parse_args(command.split()).cmd == {"transactions": "run"}.get(command, command.split()[0])
+
+
+def test_banks_country_does_not_create_an_account():
+    args = parse_args(["banks", "--country", "nl", "--filter", "ing"])
+    assert args.country == "nl" and getattr(args, "bank_country", None) is None
+
+
+@respx.mock
+def test_banks_end_to_end_json(tmp_path, monkeypatch, key_file, capsys):
+    monkeypatch.chdir(tmp_path)
+    route = respx.get(f"{BASE}/aspsps").respond(json=load_fixture("aspsps.json"))
+    assert cli.main(["banks", "--filter", "bel", "--json", "--app-id", APP_ID, "--key", str(key_file),
+                     "--redirect-url", "https://localhost/callback"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert [b["name"] for b in out["summary"]["banks"]] == ["Belfius"]
+    assert route.calls.last.request.url.params["country"] == "BE"
+
+
+def test_sessions_parsing():
+    assert parse_args(["sessions"]).cmd == "sessions" and parse_args(["sessions"]).action is None
+    args = parse_args(["sessions", "revoke", "--all", "--yes", "--json"])
+    assert args.action == "revoke" and args.all and args.yes and args.json
+    assert parse_args(["sessions", "list", "--offline"]).offline
+    args = parse_args(["sessions", "--json", "--verbose", "revoke", "--all"])  # options before the action
+    assert args.json and args.verbose and args.all
+    with pytest.raises(SystemExit):
+        parse_args(["sessions", "revoke", "--all", "--bank", "KBC"])

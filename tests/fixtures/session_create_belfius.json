@@ -1,0 +1,5 @@
+{
+  "session_id": "bbbbbbbb-8888-7777-6666-555555555555",
+  "accounts": [{"uid": "acc-uid-3", "account_id": {"iban": "DE89370400440532013000"}, "name": "Giro", "currency": "EUR"}],
+  "access": {"valid_until": "2026-11-09T10:00:00Z"}
+}

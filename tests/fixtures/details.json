@@ -1,0 +1,4 @@
+{"account_id": {"iban": "BE68539007547034"}, "name": "Zichtrekening", "product": "KBC Plus", "currency": "EUR",
+ "cash_account_type": "CACC", "usage": "PRIV", "account_servicer": {"bic_fi": "KREDBEBB"},
+ "details": null, "all_account_ids": [{"identification": "BE71096123456769", "scheme_name": "IBAN"}],
+ "uid": "acc-uid-1"}

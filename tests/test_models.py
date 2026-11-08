@@ -1,7 +1,10 @@
+from decimal import Decimal
+
 import pytest
 
 from conftest import load_fixture
-from psd2demo.eb.models import Aspsp, AuthStart, Session, SessionStatus, TransactionsPage
+from psd2demo.eb.models import (AccountDetails, Aspsp, AuthStart, Balance, Session, SessionStatus,
+                                TransactionsPage)
 
 
 def test_aspsp():
@@ -50,3 +53,14 @@ def test_aspsp_required_psu_headers():
 def test_naive_timestamps_are_utc():
     st = SessionStatus.from_json({"status": "AUTHORIZED", "access": {"valid_until": "2026-11-09T10:00:00"}})
     assert st.valid_until.utcoffset().total_seconds() == 0
+
+
+def test_balance_and_details():
+    b = [Balance.from_json(x) for x in load_fixture("balances.json")["balances"]]
+    assert b[0].amount == Decimal("1234.56") and b[0].balance_type == "CLBD" and b[0].last_change.tzinfo
+    assert b[1].last_change is None and b[2].name is None and b[2].amount == Decimal("-5.00")
+    assert AccountDetails.from_json(load_fixture("details.json")).raw["product"] == "KBC Plus"
+    with pytest.raises(ValueError):
+        Balance.from_json("x")
+    a = Aspsp.from_json({"name": "KBC", "country": "BE", "bic": "KREDBEBB", "beta": True})
+    assert a.bic == "KREDBEBB" and a.beta

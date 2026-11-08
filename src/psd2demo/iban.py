@@ -3,6 +3,7 @@
 import re
 
 IBAN_RE = re.compile(r"[A-Z]{2}\d{2}[A-Z0-9]{11,30}")
+IBAN_TOKEN_RE = re.compile(rf"\b{IBAN_RE.pattern}\b")  # an IBAN inside running text
 _COUNTRY_LENGTHS = {"BE": 16}
 
 
@@ -29,3 +30,9 @@ def mask(value: str) -> str:
         return "*" * len(value)
     middle_groups = max(1, (len(value) - 8 + 3) // 4)
     return " ".join([value[:4], *(["****"] * middle_groups), value[-4:]])
+
+
+def mask_others(text: str, keep: str | frozenset[str] | None = None) -> str:
+    """Mask every IBAN in ``text`` except ``keep`` (one IBAN or a set)."""
+    keep = {keep} if isinstance(keep, str) else keep or ()
+    return IBAN_TOKEN_RE.sub(lambda m: m.group(0) if m.group(0) in keep else mask(m.group(0)), text)

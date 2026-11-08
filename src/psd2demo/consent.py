@@ -22,8 +22,9 @@ def new_state() -> str:
     return secrets.token_urlsafe(32)
 
 
-def compute_valid_until(now: datetime, consent_days: int, max_validity_s: int | None) -> datetime:
-    seconds = consent_days * 86400
+def compute_valid_until(now: datetime, consent_days: int | None, max_validity_s: int | None) -> datetime:
+    """``consent_days`` capped at the bank's maximum; None means the maximum itself (needs ``max_validity_s``)."""
+    seconds = max_validity_s if consent_days is None else consent_days * 86400
     if max_validity_s:
         seconds = min(seconds, max_validity_s)
     return now + timedelta(seconds=seconds) - SAFETY_MARGIN

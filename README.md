@@ -18,11 +18,15 @@ cp config.example.toml config.toml   # then edit it
 ```bash
 psd2-demo check                       # verify config, key and API access (no consent)
 psd2-demo run                         # consent at your bank, then the last 10 days of transactions
-psd2-demo run --fresh                 # force a new consent
-psd2-demo run --export exports/run.json
-psd2-demo run --json                  # machine-readable result
+psd2-demo transactions --days 30      # another period (or --from 2026-10-01 --to 2026-10-15)
+psd2-demo balances                    # balances
+psd2-demo accounts --details          # accounts in the consent, plus the bank's account data
+psd2-demo banks --filter kbc          # bank names, BIC, consent limits, required PSU headers
+psd2-demo sessions                    # stored consents; `sessions revoke --account main` closes one
+psd2-demo run --account savings       # with several [accounts.<name>] in config.toml
+psd2-demo run --fresh --export exports/run.json --json
 ```
-Exit code: `0` pass, `1` a step failed, `2` configuration error, `130` interrupted.
+Exit code: `0` pass, `1` a step failed, `2` configuration or usage error, `130` interrupted.
 
 ## Test
 ```bash

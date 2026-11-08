@@ -17,6 +17,10 @@ class ConfigError(DemoError):
         self.problems = problems
 
 
+class UsageError(DemoError):
+    """Invalid command-line usage; exit code 2 like ConfigError."""
+
+
 class ConsentError(DemoError):
     pass
 

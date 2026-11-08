@@ -6,10 +6,9 @@ import sys
 
 import httpx
 
-from psd2demo.iban import IBAN_RE, mask
+from psd2demo.iban import mask_others
 
 LOGGER = "psd2demo"
-_IBAN_RE = re.compile(rf"\b{IBAN_RE.pattern}\b")
 _PATTERNS = [
     (re.compile(r"Bearer\s+[A-Za-z0-9._\-]+"), "Bearer ***"),
     (re.compile(r"\b(code|state)=[^&\s\"']+"), r"\1=***"),
@@ -18,14 +17,14 @@ _PATTERNS = [
 
 
 class RedactingFilter(logging.Filter):
-    def __init__(self, target_iban: str | None = None):
+    def __init__(self, keep_ibans: frozenset[str] = frozenset()):
         super().__init__()
-        self.target_iban = target_iban
+        self.keep_ibans = keep_ibans  # the user's own configured accounts; every other IBAN is masked
 
     def redact(self, text: str) -> str:
         for pattern, repl in _PATTERNS:
             text = pattern.sub(repl, text)
-        return _IBAN_RE.sub(lambda m: m.group(0) if m.group(0) == self.target_iban else mask(m.group(0)), text)
+        return mask_others(text, self.keep_ibans)
 
     def filter(self, record: logging.LogRecord) -> bool:
         record.msg = self.redact(record.getMessage())
@@ -33,12 +32,20 @@ class RedactingFilter(logging.Filter):
         return True
 
 
-def setup_logging(verbose: bool, target_iban: str | None = None) -> logging.Logger:
+_FILTER = RedactingFilter()
+
+
+def set_own_ibans(ibans) -> None:
+    """IBANs of the user's configured accounts stay readable in logs; all others are masked."""
+    _FILTER.keep_ibans = frozenset(ibans)
+
+
+def setup_logging(verbose: bool) -> logging.Logger:
     logger = logging.getLogger(LOGGER)
     logger.handlers.clear()
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
-    handler.addFilter(RedactingFilter(target_iban))
+    handler.addFilter(_FILTER)
     logger.addHandler(handler)
     logger.setLevel(logging.DEBUG if verbose else logging.WARNING)
     logger.propagate = False

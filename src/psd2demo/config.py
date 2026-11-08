@@ -6,7 +6,7 @@ import tomllib
 import uuid
 from dataclasses import MISSING, dataclass, field, fields
 from pathlib import Path
-from typing import Literal, Mapping
+from typing import Literal, Mapping, Sequence
 from urllib.parse import urlparse
 
 from psd2demo import iban as iban_mod
@@ -17,20 +17,37 @@ log = logging.getLogger(__name__)
 CaptureMode = Literal["paste", "listener"]
 LOOPBACK_HOSTS = {"localhost", "127.0.0.1"}
 
-# key -> (TOML section, env var)
+# App-level keys: key -> (TOML section, env var). The [demo] section is kept for 002 compatibility.
 FIELDS: dict[str, tuple[str, str]] = {
     "app_id": ("enablebanking", "EB_APP_ID"),
     "key_path": ("enablebanking", "EB_KEY_PATH"),
     "redirect_url": ("enablebanking", "EB_REDIRECT_URL"),
     "psu_ip_address": ("enablebanking", "EB_PSU_IP"),
-    "bank_name": ("demo", "EB_BANK_NAME"),
-    "bank_country": ("demo", "EB_BANK_COUNTRY"),
-    "iban": ("demo", "EB_IBAN"),
     "capture_mode": ("demo", "EB_CAPTURE_MODE"),
     "consent_days": ("demo", "EB_CONSENT_DAYS"),
     "callback_timeout": ("demo", "EB_CALLBACK_TIMEOUT"),
 }
-REQUIRED = ("app_id", "key_path", "redirect_url", "bank_name", "iban")
+REQUIRED = ("app_id", "key_path", "redirect_url")
+# Account keys, accepted in [accounts.<name>] and the legacy [demo] section.
+ACCOUNT_KEYS = ("bank_name", "bank_country", "iban")
+ACCOUNT_ENV = {"bank_name": "EB_BANK_NAME", "bank_country": "EB_BANK_COUNTRY", "iban": "EB_IBAN"}
+HISTORY_PARTS = frozenset({"balances", "details", "raw"})
+LEGACY_ACCOUNT, ENV_ACCOUNT, CLI_ACCOUNT = "demo", "env", "cli"
+
+
+@dataclass(frozen=True)
+class AccountSpec:
+    name: str
+    bank_name: str
+    bank_country: str
+    iban: str  # normalized and validated
+
+
+@dataclass(frozen=True)
+class HistorySettings:
+    days: int = 30
+    include: frozenset[str] = frozenset()
+    max_age: int = 60  # minutes
 
 
 @dataclass(frozen=True)
@@ -38,14 +55,47 @@ class Config:
     app_id: str
     key_path: Path
     redirect_url: str
-    bank_name: str
-    iban: str
-    bank_country: str = "BE"
+    accounts: dict[str, AccountSpec] = field(default_factory=dict)  # config order
+    default_account: str | None = None
+    forced_account: str | None = None  # env/CLI ad-hoc account; overrides any selection
+    history: HistorySettings = field(default_factory=HistorySettings)
     capture_mode: CaptureMode = "paste"
     consent_days: int = 1
     callback_timeout: int = 300
     psu_ip_address: str | None = None
     state_dir: Path = field(default=Path(".psd2demo"))
+
+    def account(self, name: str | None = None, *, required: bool = True) -> AccountSpec | None:
+        """The account a command works on: forced (env/CLI) > ``name`` > default_account > the only one.
+
+        With ``required=False``, "nothing to select" (no accounts, or several and none chosen) returns None;
+        an unknown name still raises.
+        """
+        chosen = self.forced_account or name or self.default_account
+        if chosen:
+            if chosen not in self.accounts:
+                raise ConfigError([f"unknown account {chosen!r}; configured: {self._names()}"])
+            return self.accounts[chosen]
+        if len(self.accounts) == 1:
+            return next(iter(self.accounts.values()))
+        if not required:
+            return None
+        if not self.accounts:
+            raise ConfigError(["no account configured: add an [accounts.<name>] section "
+                               "(bank_name, iban) or pass --bank and --iban"])
+        raise ConfigError([f"several accounts configured; pass --account (one of: {self._names()})"])
+
+    def select(self, names: Sequence[str] | None = None) -> list[AccountSpec]:
+        """Accounts for multi-account commands: ``names`` in the given order, or all in config order."""
+        if not names:
+            return list(self.accounts.values())
+        unknown = [n for n in names if n not in self.accounts]
+        if unknown:
+            raise ConfigError([f"unknown account {unknown[0]!r}; configured: {self._names()}"])
+        return [self.accounts[n] for n in names]
+
+    def _names(self) -> str:
+        return ", ".join(self.accounts) or "none"
 
 
 # Config's field defaults, except capture_mode: "auto" is resolved to paste/listener while loading.
@@ -71,22 +121,97 @@ def _read_toml(path: Path | None) -> dict:
         raise ConfigError([f"config file {path} not found"])
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError([f"config file {path} is not valid TOML: {exc}"])
-    flat = {}
-    for key, (section, _) in FIELDS.items():
-        if key in data.get(section, {}):
-            flat[key] = data[section][key]
-    return flat
+    return data
+
+
+def _account(name: str, raw: Mapping, problems: list[str]) -> AccountSpec | None:
+    bank, iban = raw.get("bank_name"), iban_mod.normalize(str(raw.get("iban") or ""))
+    if not bank or not iban:
+        problems.append(f"account {name!r} needs both bank_name and iban")
+        return None
+    try:
+        iban_mod.validate(iban)
+    except ValueError as exc:
+        problems.append(f"account {name!r}: {exc}")
+        return None
+    return AccountSpec(name, str(bank), str(raw.get("bank_country") or "BE").upper(), iban)
+
+
+def _load_accounts(data: dict, env: Mapping[str, str], overrides: Mapping[str, object],
+                   problems: list[str]) -> tuple[dict[str, AccountSpec], str | None]:
+    """[accounts.*] → legacy [demo] → env account → CLI account. Returns (accounts, forced account name)."""
+    accounts: dict[str, AccountSpec] = {}
+    tables = data.get("accounts", {})
+    if not isinstance(tables, dict):
+        problems.append("[accounts] must contain [accounts.<name>] tables")
+        tables = {}
+    for name, raw in tables.items():
+        if acc := _account(name, raw if isinstance(raw, dict) else {}, problems):
+            accounts[name] = acc
+    legacy = {k: v for k, v in data.get("demo", {}).items() if k in ACCOUNT_KEYS}
+    if legacy and LEGACY_ACCOUNT not in accounts and (acc := _account(LEGACY_ACCOUNT, legacy, problems)):
+        accounts[LEGACY_ACCOUNT] = acc
+
+    seen: dict[str, str] = {}
+    for acc in accounts.values():
+        if acc.iban in seen:
+            problems.append(f"accounts {seen[acc.iban]!r} and {acc.name!r} have the same IBAN")
+        seen.setdefault(acc.iban, acc.name)
+
+    # Env and CLI values form an ad-hoc account layered on [demo] (002 precedence: flag > env > file).
+    env_given = {k: env[v] for k, v in ACCOUNT_ENV.items() if env.get(v)}
+    cli_given = {k: overrides[k] for k in ACCOUNT_KEYS if overrides.get(k)}
+    identifies = {"bank_name", "iban"}.intersection
+    forced = CLI_ACCOUNT if identifies(cli_given) else ENV_ACCOUNT if identifies(env_given) else None
+    if forced and (acc := _account(forced, {**legacy, **env_given, **cli_given}, problems)):
+        accounts[forced] = acc
+    else:
+        forced = None
+    return accounts, forced
+
+
+def _history(data: dict, env: Mapping[str, str], problems: list[str]) -> HistorySettings:
+    raw = dict(data.get("history", {}))
+    for key, var in (("days", "EB_HISTORY_DAYS"), ("include", "EB_HISTORY_INCLUDE"), ("max_age", "EB_HISTORY_MAX_AGE")):
+        if env.get(var):
+            raw[key] = env[var]
+    defaults = HistorySettings()
+    try:
+        days = int(raw.get("days", defaults.days))
+        max_age = int(raw.get("max_age", defaults.max_age))
+        if days < 1 or max_age < 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        problems.append("[history] days must be >= 1 and max_age >= 0 (integers)")
+        return defaults
+    include = raw.get("include", [])
+    parts = [p.strip() for p in include.split(",")] if isinstance(include, str) else list(include)
+    parts = frozenset(p for p in parts if p and p != "none")
+    if parts - HISTORY_PARTS:
+        problems.append(f"[history] include: unknown part(s) {sorted(parts - HISTORY_PARTS)}; "
+                        f"allowed: {sorted(HISTORY_PARTS)}")
+        parts &= HISTORY_PARTS
+    return HistorySettings(days, parts, max_age)
 
 
 def load_config(path: Path | None, env: Mapping[str, str], overrides: Mapping[str, object]) -> Config:
+    """``overrides`` holds CLI values: app-level FIELDS keys plus bank_name/bank_country/iban (ad-hoc account)."""
+    data = _read_toml(path)
     values: dict[str, object] = dict(DEFAULTS)
-    values.update(_read_toml(path))
+    for key, (section, _) in FIELDS.items():
+        if key in data.get(section, {}):
+            values[key] = data[section][key]
     for key, (_, var) in FIELDS.items():
         if env.get(var):
             values[key] = env[var]
-    values.update({k: v for k, v in overrides.items() if v is not None})
+    values.update({k: v for k, v in overrides.items() if k in FIELDS and v is not None})
 
     problems: list[str] = []
+    accounts, forced = _load_accounts(data, env, overrides, problems)
+    history = _history(data, env, problems)
+    default_account = data.get("default_account")
+    if default_account is not None and default_account not in accounts:
+        problems.append(f"default_account {default_account!r} is not a configured account")
     for key in REQUIRED:
         if not values.get(key):
             problems.append(f"{key} is required (TOML [{FIELDS[key][0]}] {key} or env {FIELDS[key][1]})")
@@ -120,13 +245,6 @@ def load_config(path: Path | None, env: Mapping[str, str], overrides: Mapping[st
         if p.scheme not in ("http", "https") or not p.netloc:
             problems.append("redirect_url must be an absolute http(s) URL")
 
-    iban = iban_mod.normalize(str(values.get("iban") or ""))
-    if iban:
-        try:
-            iban_mod.validate(iban)
-        except ValueError as exc:
-            problems.append(str(exc))
-
     mode = str(values["capture_mode"]).lower()
     if mode == "auto":
         mode = "listener" if is_loopback_http(redirect_url) else "paste"
@@ -143,9 +261,10 @@ def load_config(path: Path | None, env: Mapping[str, str], overrides: Mapping[st
         app_id=str(values["app_id"]),
         key_path=key_path,
         redirect_url=redirect_url,
-        bank_name=str(values["bank_name"]),
-        iban=iban,
-        bank_country=str(values["bank_country"]).upper(),
+        accounts=accounts,
+        default_account=default_account,
+        forced_account=forced,
+        history=history,
         capture_mode=mode,
         consent_days=values["consent_days"],
         callback_timeout=values["callback_timeout"],

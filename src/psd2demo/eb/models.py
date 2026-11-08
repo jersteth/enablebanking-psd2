@@ -4,7 +4,8 @@
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from decimal import Decimal, InvalidOperation
 
 
 def _dt(value) -> datetime | None:
@@ -27,12 +28,19 @@ class Aspsp:
     country: str
     maximum_consent_validity: int | None = None
     required_psu_headers: list[str] = field(default_factory=list)
+    bic: str | None = None
+    beta: bool = False
+
+    @property
+    def max_consent_days(self) -> int | None:
+        return self.maximum_consent_validity // 86400 if self.maximum_consent_validity else None
 
     @classmethod
     def from_json(cls, d: dict) -> "Aspsp":
         return cls(name=_require(d, "name"), country=_require(d, "country"),
                    maximum_consent_validity=d.get("maximum_consent_validity"),
-                   required_psu_headers=list(d.get("required_psu_headers") or []))
+                   required_psu_headers=list(d.get("required_psu_headers") or []),
+                   bic=d.get("bic"), beta=bool(d.get("beta")))
 
 
 @dataclass(frozen=True)
@@ -51,11 +59,13 @@ class Account:
     iban: str | None
     name: str | None
     currency: str | None
+    cash_account_type: str | None = None
 
     @classmethod
     def from_json(cls, d: dict) -> "Account":
         return cls(uid=_require(d, "uid"), iban=(d.get("account_id") or {}).get("iban"),
-                   name=d.get("name") or d.get("product"), currency=d.get("currency"))
+                   name=d.get("name") or d.get("product"), currency=d.get("currency"),
+                   cash_account_type=d.get("cash_account_type"))
 
 
 @dataclass(frozen=True)
@@ -98,3 +108,44 @@ class TransactionsPage:
             raise ValueError("missing 'transactions' list")
         return cls(transactions=d.get("transactions") or [], continuation_key=d.get("continuation_key") or None,
                    raw=d)
+
+
+def _decimal(value) -> Decimal | None:
+    try:
+        return Decimal(str(value)) if value is not None else None
+    except InvalidOperation:
+        return None
+
+
+@dataclass(frozen=True)
+class Balance:
+    name: str | None
+    amount: Decimal | None
+    currency: str | None
+    balance_type: str | None
+    reference_date: date | None
+    last_change: datetime | None
+    last_committed_transaction: str | None
+
+    @classmethod
+    def from_json(cls, d: dict) -> "Balance":
+        if not isinstance(d, dict):
+            raise ValueError("balance is not an object")
+        amount = d.get("balance_amount") or {}
+        ref = d.get("reference_date")
+        return cls(name=d.get("name"), amount=_decimal(amount.get("amount")), currency=amount.get("currency"),
+                   balance_type=d.get("balance_type"), reference_date=date.fromisoformat(ref[:10]) if ref else None,
+                   last_change=_dt(d.get("last_change_date_time")),
+                   last_committed_transaction=d.get("last_committed_transaction"))
+
+
+@dataclass(frozen=True)
+class AccountDetails:
+    """Account resource; the fields vary per bank, so the raw object is kept and flattened for display."""
+    raw: dict
+
+    @classmethod
+    def from_json(cls, d: dict) -> "AccountDetails":
+        if not isinstance(d, dict):
+            raise ValueError("account details are not an object")
+        return cls(raw=d)

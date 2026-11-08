@@ -10,18 +10,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'   # setup (no uv on this machine)
 .venv/bin/pytest                                              # all tests (offline, respx-mocked HTTP)
 .venv/bin/pytest tests/test_client.py::test_pagination        # single test
-.venv/bin/psd2-demo check | run [--fresh] [--export F] [--json] [--verbose]
+.venv/bin/psd2-demo check | run/transactions | balances | accounts | banks | sessions [revoke|prune]
 ```
-Config: `config.toml` (git-ignored; template `config.example.toml`). Precedence: CLI flag > `EB_*` env > TOML > defaults.
+Config: `config.toml` (git-ignored; template `config.example.toml`). Precedence: CLI flag > `EB_*` env > TOML > defaults. Accounts are `[accounts.<name>]` tables (`--account`); the 002 `[demo]` bank/iban form becomes account `demo`; `--bank`+`--iban` is an ad-hoc account that overrides the selection. Top-level TOML keys (`default_account`) must precede the first table.
 
 ## Architecture
-- `src/psd2demo/eb/`: reusable Enable Banking client with no CLI/IO. `auth.py` (RS256 JWT, `kid`=app id, cached), `client.py` (httpx; GET retries on 429/5xx/network, POST only on 429 because the `/sessions` code is single-use; `iter_transactions` follows `continuation_key` with a loop guard), `models.py`, `errors.py` (`ApiError` hierarchy with hints).
-- `flow.py` orchestrates the steps CONFIG → BANK → CONSENT → ACCOUNT → TRANSACTIONS. Each step's `DemoError`/`ApiError` is reported by `StepReporter` and mapped to an exit code. Side effects (capture, browser, store, today/now) are injectable for tests.
-- `consent.py`: `state`, consent validity, redirect capture (`paste` by default; `listener` = one-shot 127.0.0.1 server, only for `http://localhost:<port>` redirect URLs), callback parsing.
-- `session_store.py`: `.psd2demo/session.json` (0600, atomic). Stores an IBAN hash, never the IBAN.
-- `cli.py` builds config → signer → client, runs the flow, and renders (`output.py`) or prints `--json`.
-- Never log the JWT, the authorization code/state, or non-target IBANs. `log.RedactingFilter` enforces this.
-- Testing pitfall: resolve `sys.stderr`/`input` at call time, not as default arguments, so pytest capture and monkeypatch work.
+- `src/psd2demo/eb/`: reusable Enable Banking client with no CLI/IO. `auth.py` (RS256 JWT, `kid`=app id, cached), `client.py` (httpx; GET retries on 429/5xx/network, non-GET only on 429 because the `/sessions` code is single-use; `iter_transactions` follows `continuation_key` with a loop guard; `request_count`), `models.py`, `errors.py` (`ApiError` hierarchy with hints; `hint_override` for caller context).
+- `cli.py` parses (parent parsers: common/account/consent/period), loads config, builds the `flow.Context`, dispatches `commands.COMMANDS[args.cmd]`, then prints `CommandResult.render()` or the `--json` envelope `{ok, failed_step, steps, summary}`.
+- `commands.py`: one function per command returning `CommandResult(summary, render)`. Each wraps its steps in one `except (DemoError, ApiError)` → `reporter.fail(ctx.step, exc)`; `ctx.step` is set by whichever step runs. Exit codes come from the error type: `ConfigError`/`UsageError` → 2, others → 1.
+- `flow.py`: `ensure_session(ctx, account, interactive, fresh, consent_days)` is the only consent path (BANK + all-or-none PSU headers → reuse the bank's stored session or a new consent → ACCOUNT). A stored record's `BankMeta` lets reuse skip `GET /aspsps`. `interactive=False` raises `ConsentRequired` (for 004). Also `run_transactions`, `StepReporter`, `Context`.
+- `session_store.py`: `.psd2demo/session.json` schema v2, one `SessionRecord` per (app, bank, country) listing every authorized account (uid, IBAN SHA-256, masked display data, never a full IBAN). v1 files are migrated on read and rewritten only on the next write; unreadable files are kept as `.bak`.
+- `config.py` (`AccountSpec`, `HistorySettings`, `Config.account()/select()`), `daterange.py` (`resolve_range`, `UsageError` → exit 2), `consent.py` (state, capture: paste default / loopback listener), `output.py` (`_table` and renderers, JSON exports 0600).
+- Never log the JWT, the authorization code/state, or non-target IBANs. `log.RedactingFilter` enforces this; `log.set_own_ibans` (called once in `cli`) keeps the configured accounts readable.
+- Testing: `tests/conftest.py` has `FakeClient`, `make_cfg`, `make_ctx(stored=True)`, `session_record`, `cmd_args` (real CLI namespace), `PasteStdin`, and the example IBAN constants. Resolve `sys.stderr`/`sys.stdin` at call time, not as default arguments, so pytest capture and monkeypatch work.
 
 ## Development Process
 

@@ -4,34 +4,146 @@ from conftest import APP_ID, VALID_IBAN
 from psd2demo.config import load_config
 from psd2demo.errors import ConfigError
 
+OTHER_IBAN = "BE71096123456769"
 
-@pytest.fixture
-def toml_file(tmp_path, key_file):
+
+def _toml(tmp_path, key_file, body, top=""):
     p = tmp_path / "config.toml"
-    p.write_text(f'''
+    p.write_text(f'''{top}
 [enablebanking]
 app_id = "{APP_ID}"
 key_path = "{key_file}"
 redirect_url = "https://example.com/callback"
-[demo]
-bank_name = "KBC"
-iban = "be68 5390 0754 7034"
+{body}
 ''')
     return p
 
 
-def test_toml_defaults(toml_file):
+@pytest.fixture
+def toml_file(tmp_path, key_file):
+    return _toml(tmp_path, key_file, '''
+[demo]
+bank_name = "KBC"
+iban = "be68 5390 0754 7034"
+''')
+
+
+@pytest.fixture
+def multi_toml(tmp_path, key_file):
+    return _toml(tmp_path, key_file, f'''
+[accounts.main]
+bank_name = "KBC"
+iban = "{VALID_IBAN}"
+
+[accounts.savings]
+bank_name = "Belfius"
+bank_country = "be"
+iban = "{OTHER_IBAN}"
+
+[history]
+days = 45
+include = ["balances", "details"]
+max_age = 15
+''', top='default_account = "savings"')
+
+
+def test_legacy_demo_section(toml_file):
     cfg = load_config(toml_file, {}, {})
-    assert cfg.iban == VALID_IBAN
-    assert cfg.bank_country == "BE"
-    assert cfg.capture_mode == "paste"
-    assert cfg.consent_days == 1
+    acc = cfg.account()
+    assert (acc.name, acc.bank_name, acc.bank_country, acc.iban) == ("demo", "KBC", "BE", VALID_IBAN)
+    assert cfg.capture_mode == "paste" and cfg.consent_days == 1
+    assert cfg.history.days == 30 and cfg.history.include == frozenset() and cfg.history.max_age == 60
 
 
 def test_precedence_flag_over_env_over_file(toml_file):
-    cfg = load_config(toml_file, {"EB_BANK_NAME": "Belfius", "EB_CONSENT_DAYS": "3"}, {"bank_name": "ING"})
-    assert cfg.bank_name == "ING"
+    cfg = load_config(toml_file, {"EB_BANK_NAME": "Belfius", "EB_CONSENT_DAYS": "3"}, {})
+    assert cfg.account().bank_name == "Belfius" and cfg.account().iban == VALID_IBAN
     assert cfg.consent_days == 3
+    cfg = load_config(toml_file, {"EB_BANK_NAME": "Belfius"}, {"bank_name": "ING"})
+    assert cfg.account().bank_name == "ING" and cfg.forced_account == "cli"
+
+
+def test_named_accounts_order_default_and_history(multi_toml):
+    cfg = load_config(multi_toml, {}, {})
+    assert list(cfg.accounts) == ["main", "savings"]
+    assert cfg.account().name == "savings"  # default_account
+    assert cfg.account("main").bank_name == "KBC"
+    assert cfg.accounts["savings"].bank_country == "BE"
+    assert [a.name for a in cfg.select(None)] == ["main", "savings"]
+    assert [a.name for a in cfg.select(["savings", "main"])] == ["savings", "main"]
+    assert cfg.history.days == 45 and cfg.history.include == {"balances", "details"} and cfg.history.max_age == 15
+
+
+def test_unknown_account(multi_toml):
+    cfg = load_config(multi_toml, {}, {})
+    with pytest.raises(ConfigError, match="unknown account 'nope'.*main, savings"):
+        cfg.account("nope")
+    with pytest.raises(ConfigError, match="unknown account"):
+        cfg.select(["main", "nope"])
+
+
+def test_several_accounts_need_selection(tmp_path, key_file):
+    path = _toml(tmp_path, key_file, f'''
+[accounts.a]
+bank_name = "KBC"
+iban = "{VALID_IBAN}"
+[accounts.b]
+bank_name = "KBC"
+iban = "{OTHER_IBAN}"
+''')
+    with pytest.raises(ConfigError, match="several accounts configured; pass --account"):
+        load_config(path, {}, {}).account()
+
+
+def test_cli_account_overrides_selection(multi_toml):
+    cfg = load_config(multi_toml, {}, {"bank_name": "ING", "iban": "NL91ABNA0417164300"})
+    assert cfg.account("main").name == "cli" and cfg.account().bank_name == "ING"
+
+
+def test_half_specified_cli_account_without_demo_is_error(multi_toml):
+    with pytest.raises(ConfigError, match="'cli' needs both bank_name and iban"):
+        load_config(multi_toml, {}, {"bank_name": "ING"})
+
+
+def test_duplicate_iban(tmp_path, key_file):
+    path = _toml(tmp_path, key_file, f'''
+[accounts.a]
+bank_name = "KBC"
+iban = "{VALID_IBAN}"
+[accounts.b]
+bank_name = "Belfius"
+iban = "{VALID_IBAN}"
+''')
+    with pytest.raises(ConfigError, match="same IBAN"):
+        load_config(path, {}, {})
+
+
+def test_bad_history_and_default_account(tmp_path, key_file):
+    path = _toml(tmp_path, key_file, top='default_account = "ghost"', body=f'''
+[accounts.a]
+bank_name = "KBC"
+iban = "{VALID_IBAN}"
+[history]
+include = ["balances", "everything"]
+''')
+    with pytest.raises(ConfigError) as exc:
+        load_config(path, {}, {})
+    assert any("default_account 'ghost'" in p for p in exc.value.problems)
+    assert any("unknown part(s) ['everything']" in p for p in exc.value.problems)
+    with pytest.raises(ConfigError, match="days must be"):
+        load_config(path.parent / "config.toml", {"EB_HISTORY_DAYS": "0"}, {})
+
+
+def test_history_env(multi_toml):
+    cfg = load_config(multi_toml, {"EB_HISTORY_INCLUDE": "raw, balances", "EB_HISTORY_DAYS": "7"}, {})
+    assert cfg.history.include == {"raw", "balances"} and cfg.history.days == 7
+
+
+def test_no_account_is_fine_until_needed(tmp_path, key_file):
+    cfg = load_config(_toml(tmp_path, key_file, ""), {}, {})
+    assert cfg.accounts == {}
+    with pytest.raises(ConfigError, match="no account configured"):
+        cfg.account()
 
 
 def test_errors_are_aggregated(tmp_path, monkeypatch):
@@ -40,7 +152,7 @@ def test_errors_are_aggregated(tmp_path, monkeypatch):
         load_config(tmp_path / "missing.toml", {}, {})
     assert "not found" in str(exc.value)
     with pytest.raises(ConfigError) as exc:
-        load_config(None, {"EB_KEY_PATH": str(tmp_path / "nokey.pem"), "EB_IBAN": "BE00"}, {})
+        load_config(None, {"EB_KEY_PATH": str(tmp_path / "nokey.pem"), "EB_BANK_NAME": "KBC", "EB_IBAN": "BE00"}, {})
     problems = exc.value.problems
     assert any("app_id" in p for p in problems)
     assert any("private key" in p for p in problems)
