@@ -3,9 +3,9 @@ import io
 import pytest
 
 from conftest import NOW, OTHER_IBAN, TODAY, VALID_IBAN, VALID_STATUS, FakeClient, session_record, write_config
-from psd2demo.errors import ConfigError
-from psd2demo.history import fetch_history
-from psd2demo.session_store import SessionStore
+from enablebanking_psd2.errors import ConfigError
+from enablebanking_psd2.history import fetch_history
+from enablebanking_psd2.session_store import SessionStore
 from test_schema import validate
 
 

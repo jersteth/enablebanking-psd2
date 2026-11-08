@@ -2,7 +2,7 @@ from datetime import date
 from decimal import Decimal
 
 from conftest import load_fixture
-from psd2demo.transactions import normalize, sort_txns, summarize
+from enablebanking_psd2.transactions import normalize, sort_txns, summarize
 
 FROM, TO = date(2026, 10, 29), date(2026, 11, 8)
 

@@ -1,4 +1,5 @@
-# Copy to config.toml (git-ignored) and fill in.
+# Copy to config.toml (git-ignored) and fill in, or run `enablebanking init`. The tool reads ./config.toml, else
+# ~/.config/enablebanking-psd2/config.toml (or --config / env ENABLEBANKING_PSD2_CONFIG).
 # Precedence: CLI flag > environment variable > this file > default.
 
 # Account used when a command gets no --account. TOML rule: top-level keys like this one must come
@@ -12,17 +13,27 @@ app_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
 # Path to the private key downloaded at registration. Keep it outside the repo, chmod 600.
 # env EB_KEY_PATH, flag --key
-key_path = "~/.config/psd2demo/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.pem"
+key_path = "~/.config/enablebanking-psd2/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.pem"
 
 # Redirect URL; must be whitelisted on the application exactly as written here.
 # https://... -> paste mode; http://localhost:<port>/... -> automatic capture (if Enable Banking accepts it).
 # env EB_REDIRECT_URL, flag --redirect-url
 redirect_url = "https://localhost/callback"
 
+# Country of your banks: default for `check` and `banks` (accounts have their own bank_country). env EB_COUNTRY
+# country = "BE"
+
 # Your public IP (curl -s https://ifconfig.me), sent as Psu-Ip-Address. Many banks require it:
 # Enable Banking accepts all of a bank's required PSU headers or none. Without it the demo sends none
 # (unattended access, which banks may cap at 4 requests per day). env EB_PSU_IP, flag --psu-ip
 # psu_ip_address = "203.0.113.10"
+
+# Where state (sessions, cache) and exports live. Default: ./.psd2demo and ./exports if they exist, else the XDG
+# folders (~/.local/state/enablebanking-psd2, ~/.local/share/enablebanking-psd2/exports). Relative paths are
+# relative to this file. env ENABLEBANKING_PSD2_STATE_DIR / ENABLEBANKING_PSD2_EXPORT_DIR
+# [paths]
+# state_dir = "state"
+# export_dir = "exports"
 
 # Accounts: one table per account. The name after "accounts." is what --account takes.
 # bank_name must be the exact Enable Banking name (`psd2-demo banks --filter <text>` lists them).

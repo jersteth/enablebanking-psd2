@@ -6,7 +6,7 @@ import httpx
 import respx
 
 from conftest import BASE, FOREIGN_IBAN, OTHER_IBAN, VALID_IBAN, PasteStdin, load_fixture, write_config
-from psd2demo import cli
+from enablebanking_psd2 import cli
 
 MAIN, SAVINGS, GIRO = VALID_IBAN, OTHER_IBAN, FOREIGN_IBAN
 
@@ -19,6 +19,7 @@ def _config(tmp_path, key_file):
 @respx.mock
 def test_one_consent_per_bank(tmp_path, monkeypatch, key_file, capsys):
     monkeypatch.chdir(tmp_path)
+    (tmp_path / ".psd2demo").mkdir()  # legacy project-local state dir
     _config(tmp_path, key_file)
     respx.get(f"{BASE}/aspsps").respond(json=load_fixture("aspsps.json"))
     auth = respx.post(f"{BASE}/auth").respond(json=load_fixture("auth.json"))

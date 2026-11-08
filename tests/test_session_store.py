@@ -3,8 +3,8 @@ import stat
 from datetime import datetime, timedelta, timezone
 
 from conftest import APP_ID, VALID_IBAN, session_record
-from psd2demo.config import AccountSpec
-from psd2demo.session_store import BankMeta, SessionStore, StoredAccount, iban_hash
+from enablebanking_psd2.config import AccountSpec
+from enablebanking_psd2.session_store import BankMeta, SessionStore, StoredAccount, iban_hash
 
 OTHER_IBAN = "BE71096123456769"
 V1 = {"schema_version": 1, "session_id": "s1", "app_id": APP_ID, "bank_name": "KBC", "bank_country": "BE",

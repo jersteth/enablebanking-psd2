@@ -1,8 +1,8 @@
 import json
 
 from conftest import FakeClient, cmd_args, make_ctx
-from psd2demo.commands import balances
-from psd2demo.output import render_balances
+from enablebanking_psd2.commands import balances
+from enablebanking_psd2.output import render_balances
 
 
 def _run(tmp_path, client=None, *argv):

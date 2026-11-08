@@ -5,7 +5,7 @@ from datetime import timedelta
 
 import httpx
 
-from psd2demo.log import RedactingFilter, http_event_hooks, set_own_ibans, setup_logging, truncate_body
+from enablebanking_psd2.log import RedactingFilter, http_event_hooks, set_own_ibans, setup_logging, truncate_body
 
 TARGET = "BE68539007547034"
 
@@ -60,7 +60,7 @@ def test_verbose_http_hook_logs_redacted_response(capsys):
 
 
 def test_package_logger_is_silent_without_cli_setup():
-    code = ("import logging, psd2demo; logging.getLogger('psd2demo.x').warning('should not print'); "
-            "print(any(isinstance(h, logging.NullHandler) for h in logging.getLogger('psd2demo').handlers))")
+    code = ("import logging, enablebanking_psd2; logging.getLogger('enablebanking_psd2.x').warning('should not print'); "
+            "print(any(isinstance(h, logging.NullHandler) for h in logging.getLogger('enablebanking_psd2').handlers))")
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert out.stdout.strip() == "True" and out.stderr == ""

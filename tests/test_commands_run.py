@@ -2,8 +2,8 @@ import json
 from datetime import date
 
 from conftest import FakeClient, cmd_args, make_ctx
-from psd2demo.commands import run
-from psd2demo.flow import Step
+from enablebanking_psd2.commands import run
+from enablebanking_psd2.flow import Step
 
 
 def _ctx(tmp_path):
@@ -48,15 +48,23 @@ def test_export_inside_exports_dir(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     ctx, out = _ctx(tmp_path)
     res = run(ctx, run_args(export=tmp_path / "exports" / "run.json"))
-    assert res.ok and "outside exports/" not in out.getvalue()
+    assert res.ok and "git-ignored" not in out.getvalue()
     assert json.loads((tmp_path / "exports" / "run.json").read_text())["meta"]["account"] == "main"
 
 
-def test_export_outside_exports_dir_warns(tmp_path, monkeypatch):
+def test_export_outside_exports_dir_warns_in_a_git_worktree(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".git").mkdir()
+    ctx, out = _ctx(tmp_path)
+    assert run(ctx, run_args(export=tmp_path / "run.json")).ok
+    assert "so it may not be git-ignored" in out.getvalue()
+
+
+def test_export_outside_exports_dir_is_silent_outside_a_git_worktree(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     ctx, out = _ctx(tmp_path)
     assert run(ctx, run_args(export=tmp_path / "run.json")).ok
-    assert "outside exports/, so it is not git-ignored" in out.getvalue()
+    assert "git-ignored" not in out.getvalue()
 
 
 def test_export_failure_keeps_render(tmp_path, monkeypatch):

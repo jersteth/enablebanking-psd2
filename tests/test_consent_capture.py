@@ -7,8 +7,8 @@ import urllib.request
 
 import pytest
 
-from psd2demo.consent import capture_listener, capture_paste, prompt_stderr
-from psd2demo.errors import CallbackTimeout, ConsentError
+from enablebanking_psd2.consent import capture_listener, capture_paste, prompt_stderr
+from enablebanking_psd2.errors import CallbackTimeout, ConsentError
 
 
 def test_paste_returns_input():

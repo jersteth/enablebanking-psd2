@@ -1,0 +1,143 @@
+{
+  "schema_version": "1",
+  "generated_at": "2026-11-08T12:00:00Z",
+  "tool": {
+    "name": "psd2-demo",
+    "version": "0.1.0"
+  },
+  "range": {
+    "date_from": "2026-10-09",
+    "date_to": "2026-11-08"
+  },
+  "include": [
+    "balances",
+    "details"
+  ],
+  "accounts": [
+    {
+      "name": "main",
+      "bank": "KBC",
+      "country": "BE",
+      "iban": "BE68539007547034",
+      "currency": "EUR",
+      "status": "ok",
+      "error": null,
+      "warnings": [],
+      "session_valid_until": "2027-05-07T10:00:00+00:00",
+      "fetched_at": "2026-11-08T12:00:00Z",
+      "truncated": false,
+      "cached": false,
+      "stale": false,
+      "api_calls": 4,
+      "transactions": [
+        {
+          "id": "h:b8d568aa4a89a6b67a03f028b3ee32fc",
+          "booking_date": null,
+          "value_date": "2026-11-07",
+          "transaction_date": null,
+          "amount": "-9.99",
+          "currency": "EUR",
+          "counterparty_name": "Streaming Co",
+          "counterparty_iban": null,
+          "remittance": null,
+          "status": "PDNG",
+          "reference": null,
+          "out_of_range": false
+        },
+        {
+          "id": "ref:REF-001",
+          "booking_date": "2026-11-05",
+          "value_date": "2026-11-05",
+          "transaction_date": null,
+          "amount": "-42.50",
+          "currency": "EUR",
+          "counterparty_name": "Delhaize",
+          "counterparty_iban": "BE71096123456769",
+          "remittance": "Groceries / Card 1234",
+          "status": "BOOK",
+          "reference": "REF-001",
+          "out_of_range": false
+        },
+        {
+          "id": "ref:TX-002",
+          "booking_date": "2026-11-01",
+          "value_date": "2026-11-01",
+          "transaction_date": null,
+          "amount": "+2500.00",
+          "currency": "EUR",
+          "counterparty_name": "Employer NV",
+          "counterparty_iban": "BE62510007547061",
+          "remittance": "Salary October",
+          "status": "BOOK",
+          "reference": "TX-002",
+          "out_of_range": false
+        }
+      ],
+      "balances": [
+        {
+          "name": "Booked balance",
+          "type": "CLBD",
+          "type_label": "closing booked",
+          "amount": "+1234.56",
+          "currency": "EUR",
+          "reference_date": "2026-11-07",
+          "last_change": "2026-11-07T23:59:59Z"
+        },
+        {
+          "name": "Available",
+          "type": "ITAV",
+          "type_label": "interim available",
+          "amount": "+1100.00",
+          "currency": "EUR",
+          "reference_date": "2026-11-08",
+          "last_change": null
+        }
+      ],
+      "details": {
+        "product": "KBC Plus",
+        "cash_account_type": "CACC"
+      }
+    },
+    {
+      "name": "savings",
+      "bank": "KBC",
+      "country": "BE",
+      "iban": "BE71096123456769",
+      "currency": null,
+      "status": "consent_required",
+      "error": {
+        "step": "SESSION",
+        "message": "consent required for account 'savings' (KBC)",
+        "http_status": null,
+        "api_error": null,
+        "hint": "enablebanking authorize --account savings"
+      },
+      "warnings": [],
+      "session_valid_until": null,
+      "fetched_at": null,
+      "truncated": false,
+      "cached": false,
+      "stale": false,
+      "api_calls": 0,
+      "transactions": [],
+      "balances": null,
+      "details": null
+    }
+  ],
+  "summary": {
+    "accounts": {
+      "ok": 1,
+      "consent_required": 1,
+      "rate_limited": 0,
+      "error": 0
+    },
+    "totals": {
+      "EUR": {
+        "count": 3,
+        "credits": "+2500.00",
+        "debits": "-52.49",
+        "net": "+2447.51"
+      }
+    }
+  }
+}

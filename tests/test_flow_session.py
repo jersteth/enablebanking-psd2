@@ -5,12 +5,12 @@ import pytest
 
 from conftest import (APP_ID, NOW, OTHER_IBAN, VALID_IBAN, VALID_STATUS, FakeClient, load_fixture, make_cfg,
                       make_ctx, session_record)
-from psd2demo.eb.errors import ApiAuthError, ApiError, ApiNotFound
-from psd2demo.eb.models import SessionStatus, TransactionsPage
-from psd2demo.session_store import BankMeta
-from psd2demo.errors import AccountNotFound, ConsentDenied, StateMismatch
-from psd2demo.flow import ConsentRequired, Step, ensure_session, run_transactions
-from psd2demo.session_store import StoredAccount, iban_hash
+from enablebanking_psd2.eb.errors import ApiAuthError, ApiError, ApiNotFound
+from enablebanking_psd2.eb.models import SessionStatus, TransactionsPage
+from enablebanking_psd2.session_store import BankMeta
+from enablebanking_psd2.errors import AccountNotFound, ConsentDenied, StateMismatch
+from enablebanking_psd2.flow import ConsentRequired, Step, ensure_session, run_transactions
+from enablebanking_psd2.session_store import StoredAccount, iban_hash
 
 MAIN_IBAN, SAVINGS_IBAN = VALID_IBAN, OTHER_IBAN
 
@@ -76,7 +76,7 @@ def test_non_interactive_raises_consent_required(tmp_path):
     ctx, _, opened = _ctx(tmp_path, FakeClient())
     with pytest.raises(ConsentRequired, match="consent required for account 'main'") as exc:
         ensure_session(ctx, ctx.cfg.account("main"), interactive=False)
-    assert exc.value.hint == "psd2-demo authorize --account main" and opened == []
+    assert exc.value.hint == "enablebanking authorize --account main" and opened == []
     assert ctx.step is Step.CONSENT
 
 
@@ -113,7 +113,7 @@ def test_save_failure_warns_and_continues(tmp_path, monkeypatch):
     def broken(self, record):
         raise PermissionError(13, "Permission denied")
 
-    monkeypatch.setattr("psd2demo.session_store.SessionStore.upsert", broken)
+    monkeypatch.setattr("enablebanking_psd2.session_store.SessionStore.upsert", broken)
     ctx, out, _ = _ctx(tmp_path, FakeClient())
     assert ensure_session(ctx, ctx.cfg.account("main")).uid == "acc-uid-1"
     assert "session not saved (Permission denied)" in out.getvalue()

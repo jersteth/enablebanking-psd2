@@ -2,7 +2,7 @@ import os
 import stat
 from datetime import date, datetime, timedelta, timezone
 
-from psd2demo.cache import HistoryCache
+from enablebanking_psd2.cache import HistoryCache
 
 NOW = datetime(2026, 11, 8, 12, tzinfo=timezone.utc)
 KEY = HistoryCache.key("app", "hash", date(2026, 10, 9), date(2026, 11, 8), frozenset({"raw", "balances"}))

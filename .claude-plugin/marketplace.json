@@ -1,0 +1,12 @@
+{
+  "name": "enablebanking-psd2",
+  "owner": { "name": "Jeroen Ost" },
+  "description": "Agent skills for reading your own bank accounts through Enable Banking (PSD2)",
+  "plugins": [
+    {
+      "name": "enablebanking-psd2",
+      "source": "./",
+      "description": "bank-account-history and bank-account-setup skills; needs the enablebanking-psd2 CLI (pipx install enablebanking-psd2)"
+    }
+  ]
+}

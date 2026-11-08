@@ -4,8 +4,8 @@ import pytest
 import respx
 
 from conftest import APP_ID, BASE, PasteStdin, cli_args, load_fixture
-from psd2demo import cli
-from psd2demo.cli import parse_args
+from enablebanking_psd2 import cli
+from enablebanking_psd2.cli import parse_args
 
 
 def test_help_exits_zero(capsys):
@@ -34,6 +34,7 @@ def test_check_subcommand_overrides():
 def api(monkeypatch, tmp_path):
     """Mock the API, the browser and the paste prompt (which answers with this run's state)."""
     monkeypatch.chdir(tmp_path)
+    (tmp_path / ".psd2demo").mkdir()  # the legacy project-local state dir is used when it exists
     respx.get(f"{BASE}/aspsps").respond(json=load_fixture("aspsps.json"))
     auth = respx.post(f"{BASE}/auth").respond(json=load_fixture("auth.json"))
     respx.post(f"{BASE}/sessions").respond(json=load_fixture("session_create.json"))

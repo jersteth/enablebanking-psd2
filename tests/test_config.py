@@ -1,8 +1,10 @@
+from pathlib import Path
+
 import pytest
 
 from conftest import APP_ID, VALID_IBAN
-from psd2demo.config import load_config
-from psd2demo.errors import ConfigError
+from enablebanking_psd2.config import load_config
+from enablebanking_psd2.errors import ConfigError
 
 OTHER_IBAN = "BE71096123456769"
 
@@ -179,3 +181,68 @@ def test_loose_key_permissions_warn(toml_file, key_file, caplog):
 def test_bad_consent_days(toml_file):
     with pytest.raises(ConfigError, match="consent_days"):
         load_config(toml_file, {"EB_CONSENT_DAYS": "zero"}, {})
+
+
+# --- location independence and country (005) ----------------------------------------------------------
+
+ENV_ONLY = {"EB_APP_ID": APP_ID, "EB_REDIRECT_URL": "https://example.com/callback", "EB_BANK_NAME": "KBC",
+            "EB_IBAN": VALID_IBAN}
+
+
+def test_env_only_config_without_any_file(tmp_path, key_file):
+    cfg = load_config(None, {**ENV_ONLY, "EB_KEY_PATH": str(key_file)}, {}, cwd=tmp_path)
+    assert cfg.config_path is None and cfg.app_id == APP_ID and cfg.country == "BE"
+    assert cfg.forced_account == "env" and cfg.accounts["env"].iban == VALID_IBAN
+
+
+def test_no_config_and_incomplete_env_points_to_init(tmp_path):
+    with pytest.raises(ConfigError) as exc:
+        load_config(None, {}, {}, cwd=tmp_path)
+    assert any("app_id is required" in p for p in exc.value.problems)
+    assert any("enablebanking init" in p for p in exc.value.problems)
+
+
+def test_explicit_or_env_named_missing_file_is_an_error(tmp_path):
+    with pytest.raises(ConfigError, match="not found"):
+        load_config(tmp_path / "nope.toml", {}, {}, cwd=tmp_path)
+    with pytest.raises(ConfigError, match="not found"):
+        load_config(None, {"ENABLEBANKING_PSD2_CONFIG": str(tmp_path / "nope.toml")}, {}, cwd=tmp_path)
+
+
+def test_user_config_is_found_from_any_directory(tmp_path, key_file, toml_file, monkeypatch):
+    home = tmp_path / "home"
+    (home / ".config" / "enablebanking-psd2").mkdir(parents=True)
+    (home / ".config" / "enablebanking-psd2" / "config.toml").write_text(toml_file.read_text())
+    monkeypatch.setenv("HOME", str(home))
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    cfg = load_config(None, {}, {}, cwd=elsewhere)
+    assert cfg.config_path == home / ".config" / "enablebanking-psd2" / "config.toml"
+    assert cfg.state_dir == home / ".local" / "state" / "enablebanking-psd2"
+    assert cfg.export_dir == home / ".local" / "share" / "enablebanking-psd2" / "exports"
+
+
+def test_country_and_paths_section(tmp_path, key_file):
+    toml = _toml(tmp_path, key_file, '''country = "nl"
+[paths]
+state_dir = "st"
+export_dir = "/abs/out"
+[demo]
+bank_name = "ING"
+bank_country = "NL"
+iban = "NL91ABNA0417164300"
+''')
+    cfg = load_config(toml, {}, {}, cwd=tmp_path / "elsewhere")
+    assert cfg.country == "NL"
+    assert cfg.state_dir == tmp_path / "st" and cfg.export_dir == Path("/abs/out")  # relative → config file dir
+    assert load_config(toml, {"EB_COUNTRY": "de"}, {}, cwd=tmp_path).country == "DE"
+
+
+@pytest.mark.parametrize("value", ["B", "BEL", "1A"])
+def test_invalid_country(tmp_path, key_file, value):
+    with pytest.raises(ConfigError, match="country must be a 2-letter"):
+        load_config(_toml(tmp_path, key_file, f'''country = "{value}"
+[demo]
+bank_name = "KBC"
+iban = "{VALID_IBAN}"
+'''), {}, {}, cwd=tmp_path)

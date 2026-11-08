@@ -2,10 +2,10 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from conftest import VALID_IBAN, load_fixture
-from psd2demo import contract
-from psd2demo.config import AccountSpec
-from psd2demo.eb.models import Balance
-from psd2demo.transactions import normalize
+from enablebanking_psd2 import contract
+from enablebanking_psd2.config import AccountSpec
+from enablebanking_psd2.eb.models import Balance
+from enablebanking_psd2.transactions import normalize
 
 ACC = AccountSpec("main", "KBC", "BE", VALID_IBAN)
 FROM, TO = date(2026, 10, 9), date(2026, 11, 8)

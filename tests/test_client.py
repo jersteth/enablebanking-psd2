@@ -6,10 +6,10 @@ import pytest
 import respx
 
 from conftest import APP_ID, BASE, load_fixture
-from psd2demo.eb import errors
-from psd2demo.eb.auth import JwtSigner
-from psd2demo.eb.client import EnableBankingClient
-from psd2demo.eb.models import Aspsp
+from enablebanking_psd2.eb import errors
+from enablebanking_psd2.eb.auth import JwtSigner
+from enablebanking_psd2.eb.client import EnableBankingClient
+from enablebanking_psd2.eb.models import Aspsp
 
 @pytest.fixture
 def sleeps():

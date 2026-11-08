@@ -3,8 +3,8 @@ import stat
 from datetime import date
 
 from conftest import load_fixture
-from psd2demo.output import export_json, render_summary, render_transactions
-from psd2demo.transactions import normalize, sort_txns, summarize
+from enablebanking_psd2.output import export_json, render_summary, render_transactions
+from enablebanking_psd2.transactions import normalize, sort_txns, summarize
 
 FROM, TO = date(2026, 10, 29), date(2026, 11, 8)
 

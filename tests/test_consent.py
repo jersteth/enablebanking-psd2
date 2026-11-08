@@ -2,8 +2,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from psd2demo.consent import compute_valid_until, new_state, parse_callback
-from psd2demo.errors import ConsentDenied, ConsentError, StateMismatch
+from enablebanking_psd2.consent import compute_valid_until, new_state, parse_callback
+from enablebanking_psd2.errors import ConsentDenied, ConsentError, StateMismatch
 
 NOW = datetime(2026, 11, 8, 12, tzinfo=timezone.utc)
 

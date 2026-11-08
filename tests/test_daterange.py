@@ -3,7 +3,7 @@ from datetime import date
 
 import pytest
 
-from psd2demo.daterange import UsageError, iso_date, resolve_range
+from enablebanking_psd2.daterange import UsageError, iso_date, resolve_range
 
 TODAY = date(2026, 11, 8)
 

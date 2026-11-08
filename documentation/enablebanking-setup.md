@@ -1,6 +1,8 @@
 # Enable Banking Setup Guide
 
-This guide goes from nothing to a passing `psd2-demo run` against one of your own Belgian personal accounts, using Enable Banking's **production** environment in **restricted mode**. Restricted mode is free, needs no contract, and is limited to accounts you link yourself. Enable Banking's terms allow it for evaluation and for personal, non-commercial use.
+This is the "bring your own Enable Banking app" guide. It goes from nothing to a passing `enablebanking run` against one of your own personal bank accounts, in any country Enable Banking supports (Belgium is the tested example), using Enable Banking's **production** environment in **restricted mode**. Restricted mode is free, needs no contract, and is limited to accounts you link yourself. Enable Banking's terms allow it for evaluation and for personal, non-commercial use. Every user registers their own application and keeps their own private key: this project runs no shared application and never receives anyone's bank data.
+
+Install first: `pipx install enablebanking-psd2` (or `pip install`). Once you have the application ID, the key and a linked account (steps 1–4), `enablebanking init` writes the config for you (step 5); step 5 also lists every setting if you prefer to edit it by hand.
 
 > Items marked **(unverified)** come from third-party guides or assumptions, not from Enable Banking's documentation.
 
@@ -15,7 +17,7 @@ Click **Add a new application** and fill in the form:
 |---|---|
 | **Environment** | **Production**. Sandbox only offers mock banks. |
 | **Private key** | Keep the default: the key is generated in your browser. |
-| **Application name** | Any name, e.g. `psd2-demo personal`. Your bank shows it on its consent screen. |
+| **Application name** | Any name, e.g. `enablebanking personal`. Your bank shows it on its consent screen. |
 | **Redirect URLs** | See [Choosing a redirect URL](#choosing-a-redirect-url). Recommended: `https://localhost/callback`. |
 | Privacy policy / Terms URLs (if asked) | Must be full URLs starting with `https://`. Without the prefix the form returns **"Invalid URL"** (reported by third-party guides, unverified). |
 | Description / e-mail (if asked) | Free text / your e-mail. |
@@ -37,33 +39,44 @@ The `redirect_url` in your config must match a whitelisted URL **exactly**.
 ## 3. Store the private key
 Keep the key outside the repository and readable only by you:
 ```bash
-mkdir -p ~/.config/psd2demo
-mv ~/Downloads/<application-id>.pem ~/.config/psd2demo/
-chmod 600 ~/.config/psd2demo/<application-id>.pem
+mkdir -p ~/.config/enablebanking-psd2
+mv ~/Downloads/<application-id>.pem ~/.config/enablebanking-psd2/
+chmod 600 ~/.config/enablebanking-psd2/<application-id>.pem
 ```
 
 ## 4. Activate the application by linking your account
 A new production application is **Inactive**.
 1. In the Control Panel, open your application and click **Activate by linking accounts**.
-2. Choose your bank (country Belgium), and authenticate at the bank (itsme, card reader, or app).
+2. Choose your bank (your country), and authenticate at the bank (itsme, card reader, or app).
 3. Select the account you want to use in the demo and confirm.
 4. The application status becomes **Active** (restricted mode). From now on it can only read the linked accounts.
 
-Linking does **not** replace the demo's own consent: `psd2-demo run` still sends you to your bank once to approve API access.
+Linking does **not** replace the demo's own consent: `enablebanking run` still sends you to your bank once to approve API access.
 
-## 5. Configure the demo
-```bash
-cp config.example.toml config.toml   # config.toml is git-ignored
-```
-Edit `config.toml`:
+## 5. Configure
+**Guided:** `enablebanking init` asks for the application ID, the key path, the redirect URL, your public IP (optional), your country and your accounts (found by bank search), writes `~/.config/enablebanking-psd2/config.toml` (mode 0600) and runs `check`. It refuses a key file other users can read.
+
+**By hand:** copy `config.example.toml` and edit it. Where the tool looks for the config, the state and the exports (first match wins):
+
+| | Config file | State (sessions, cache) | Exports (`history --save`) |
+|---|---|---|---|
+| explicit | `--config FILE` | `[paths] state_dir` | `[paths] export_dir` |
+| environment | `ENABLEBANKING_PSD2_CONFIG` | `ENABLEBANKING_PSD2_STATE_DIR` | `ENABLEBANKING_PSD2_EXPORT_DIR` |
+| project folder | `./config.toml` | `./.psd2demo` (if it exists) | `./exports` (if it exists) |
+| per-user default | `$XDG_CONFIG_HOME/enablebanking-psd2/config.toml` | `$XDG_STATE_HOME/enablebanking-psd2` | `$XDG_DATA_HOME/enablebanking-psd2/exports` |
+
+The XDG defaults are `~/.config`, `~/.local/state` and `~/.local/share`; on Windows all three are under `%APPDATA%\enablebanking-psd2` (file modes 0600/0700 are not enforced there). Relative `[paths]` values are relative to the config file. With every `EB_*` variable set you need no config file at all.
+
+Settings:
 
 | Key | Where it comes from | Env var |
 |---|---|---|
 | `app_id` | the `.pem` file name (without `.pem`) | `EB_APP_ID` |
 | `key_path` | the path from step 3 (`~` is expanded) | `EB_KEY_PATH` |
 | `redirect_url` | the URL you whitelisted in step 2 | `EB_REDIRECT_URL` |
-| `[accounts.<name>]` → `bank_name` | your bank's exact name at Enable Banking (`psd2-demo banks --filter <text>`) | `EB_BANK_NAME` |
-| `[accounts.<name>]` → `bank_country` | `BE` (default) | `EB_BANK_COUNTRY` |
+| `[accounts.<name>]` → `bank_name` | your bank's exact name at Enable Banking (`enablebanking banks --filter <text>`) | `EB_BANK_NAME` |
+| `[accounts.<name>]` → `bank_country` | the bank's country code, `BE` by default | `EB_BANK_COUNTRY` |
+| `country` (in `[enablebanking]`) | default country for `check` and `banks` (default `BE`) | `EB_COUNTRY` |
 | `[accounts.<name>]` → `iban` | the account linked in step 4; spaces are allowed | `EB_IBAN` |
 | `default_account` | the account used without `--account`; **put it before the first `[section]`** (TOML rule) | – |
 | `capture_mode` | `auto` (default): `listener` for `http://localhost:<port>`, otherwise `paste` | `EB_CAPTURE_MODE` |
@@ -77,23 +90,23 @@ Edit `config.toml`:
 
 **Accounts.** Add one `[accounts.<name>]` table per account; `<name>` is what `--account` takes. With a single account you never need `--account`. The 002 form (`bank_name`/`iban` directly in `[demo]`) still works and becomes the account `demo`. `--bank` + `--iban` (or `EB_BANK_NAME` + `EB_IBAN`) define an ad-hoc account that overrides the selection. Accounts at the same bank share one consent.
 
-Each key can also be overridden per run with a flag (`--app-id`, `--psu-ip`, `--account`, …; see `psd2-demo <command> --help`).
+Each key can also be overridden per run with a flag (`--app-id`, `--psu-ip`, `--account`, …; see `enablebanking <command> --help`).
 
 ## 6. Verify the setup
 ```bash
-psd2-demo check
+enablebanking check
 ```
-It loads the config and key, signs a JWT, and lists the Belgian banks (`GET /aspsps`). It does not start a consent. Expected output:
+It loads the config and key, signs a JWT, and lists your country's banks (`GET /aspsps`). It does not start a consent. Expected output:
 ```
 [✓] CONFIG       app aaaaaaaa-…, 1 account(s), capture=paste
 [✓] BANK         KBC (BE), max consent validity 180 days
       bank requires PSU headers: Psu-Ip-Address, Psu-User-Agent
 ```
-If the bank name doesn't match exactly, `check` prints the candidate names. Copy one into `bank_name`. With several accounts, `psd2-demo check --account <name>` checks that account's bank.
+If the bank name doesn't match exactly, `check` prints the candidate names. Copy one into `bank_name`. With several accounts, `enablebanking check --account <name>` checks that account's bank.
 
 ## 7. First run
 ```bash
-psd2-demo run          # "run" is the default: plain `psd2-demo` does the same
+enablebanking run          # "run" is the default: plain `enablebanking` does the same
 ```
 1. `CONFIG` and `BANK` pass as in `check`.
 2. The demo starts a consent (`POST /auth`), prints the bank URL, and opens it in your browser.
@@ -125,27 +138,27 @@ Summary:
 Exit code `0` means every step passed. Zero transactions is also a pass ("no transactions in range").
 
 ### Later runs
-- While the consent is valid (`consent_days`, default 1 day), `psd2-demo run` reuses the stored session (`[✓] CONSENT reused session ...`) and doesn't open the browser.
-- `psd2-demo run --fresh` forces a new consent.
-- `psd2-demo run --export exports/run.json` also writes the normalized transactions and the raw API pages (file mode 0600; `exports/` is git-ignored).
-- `psd2-demo run --json` prints a machine-readable result to stdout instead of the tables. If a new consent is needed, the bank URL and paste prompt still appear on stderr, so stdout stays valid JSON.
+- While the consent is valid (`consent_days`, default 1 day), `enablebanking run` reuses the stored session (`[✓] CONSENT reused session ...`) and doesn't open the browser.
+- `enablebanking run --fresh` forces a new consent.
+- `enablebanking run --export exports/run.json` also writes the normalized transactions and the raw API pages (file mode 0600; `exports/` is git-ignored).
+- `enablebanking run --json` prints a machine-readable result to stdout instead of the tables. If a new consent is needed, the bank URL and paste prompt still appear on stderr, so stdout stays valid JSON.
 - `--verbose` logs each HTTP call (tokens, codes and other IBANs redacted).
 
-Local state: `.psd2demo/session.json` (mode 0600) holds one record per bank: the session ID, validity, the bank's consent limits, and for each authorized account its UID, a SHA-256 of the IBAN and display data (masked IBAN, name, currency); never a full IBAN. A 002 file is read as-is and converted on the next consent. An unreadable file is never overwritten silently: it is kept as `session.json.bak`.
+Local state: `session.json` in the state folder (see step 5) (mode 0600) holds one record per bank: the session ID, validity, the bank's consent limits, and for each authorized account its UID, a SHA-256 of the IBAN and display data (masked IBAN, name, currency); never a full IBAN. A 002 file is read as-is and converted on the next consent. An unreadable file is never overwritten silently: it is kept as `session.json.bak`.
 
 ## 8. Commands
 | Command | What it does |
 |---|---|
-| `psd2-demo run` (alias `transactions`) | transactions of one account; default the last 10 days |
-| `psd2-demo run --days 30` / `--from 2026-10-01 [--to 2026-10-15]` | another period (`--to` defaults to today; `--days` and `--from` exclude each other) |
-| `psd2-demo balances` | the account's balances with their ISO 20022 type (`CLBD` closing booked, `ITAV` interim available, …) |
-| `psd2-demo accounts [--details]` | the accounts your consent covers (others masked); `--details` adds the bank's data for the selected account |
-| `psd2-demo banks [--filter kbc] [--country BE]` | banks with BIC, maximum consent length and required PSU headers; needs no account |
-| `psd2-demo sessions [--offline]` | stored consents with local and live status |
-| `psd2-demo sessions revoke --account <name>` / `--bank <name>` / `--all [--yes]` | close the consent at the bank (`DELETE /sessions`); `--all` asks to confirm |
-| `psd2-demo sessions prune` | delete revoked or expired local records |
+| `enablebanking run` (alias `transactions`) | transactions of one account; default the last 10 days |
+| `enablebanking run --days 30` / `--from 2026-10-01 [--to 2026-10-15]` | another period (`--to` defaults to today; `--days` and `--from` exclude each other) |
+| `enablebanking balances` | the account's balances with their ISO 20022 type (`CLBD` closing booked, `ITAV` interim available, …) |
+| `enablebanking accounts [--details]` | the accounts your consent covers (others masked); `--details` adds the bank's data for the selected account |
+| `enablebanking banks [--filter kbc] [--country BE]` | banks with BIC, maximum consent length and required PSU headers; needs no account |
+| `enablebanking sessions [--offline]` | stored consents with local and live status |
+| `enablebanking sessions revoke --account <name>` / `--bank <name>` / `--all [--yes]` | close the consent at the bank (`DELETE /sessions`); `--all` asks to confirm |
+| `enablebanking sessions prune` | delete revoked or expired local records |
 
-Every command takes `--account <name>` where relevant, `--json` (machine-readable result on stdout), `--verbose`, and exits `0` (ok), `1` (a step failed), `2` (config or usage error) or `130` (interrupted). `run` and `balances` take `--export FILE`; a path outside `exports/` gets a warning, because it is not git-ignored and holds personal data.
+Every command takes `--account <name>` where relevant, `--json` (machine-readable result on stdout), `--verbose`, and exits `0` (ok), `1` (a step failed), `2` (config or usage error) or `130` (interrupted). `run` and `balances` take `--export FILE`; a path outside the export folder gets a warning when it is inside a git work tree, because it may not be git-ignored and holds personal data.
 
 Revoking is the only command that changes anything at the bank; nothing revokes implicitly. After a revoke, the next command for that bank asks for a new consent.
 
@@ -161,13 +174,14 @@ Revoking is the only command that changes anything at the bank; nothing revokes 
 | `[✗] CONSENT authorization failed at the bank: access_denied` | Consent cancelled or refused at the bank | Rerun and approve; use the same bank login as when linking |
 | `[✗] CONSENT callback state does not match` | Pasted a redirect URL from an older attempt | Paste the URL from the current run |
 | `[✗] CONSENT no callback received within 300 s` | Bank flow not finished in time | Rerun; raise `callback_timeout` if needed |
-| `[✗] ACCOUNT account ... not in the authorized session` | Account not linked to the app, or not selected at the bank | Link it in the Control Panel (step 4) and select it at the bank; `psd2-demo run --fresh` |
-| `[✗] TRANSACTIONS` 401/403 after a reused session | Consent expired or revoked at the bank | `psd2-demo run --fresh` |
+| `[✗] ACCOUNT account ... not in the authorized session` | Account not linked to the app, or not selected at the bank | Link it in the Control Panel (step 4) and select it at the bank; `enablebanking run --fresh` |
+| `[✗] TRANSACTIONS` 401/403 after a reused session | Consent expired or revoked at the bank | `enablebanking run --fresh` |
 | `422 PSU_HEADER_NOT_PROVIDED ... psu-ip-address is not provided` | The bank requires a full set of PSU headers and got a partial one (fixed since the demo sends all or none) | Set `psu_ip_address` to your public IP so the full set is sent |
 | `429 Too many requests` | Rate limit; under PSD2 a bank may cap access without the user present at 4 per day per account | Wait and retry later; avoid running in loops |
 | `ASPSP_ERROR` | Bank-side problem | Retry later |
 | Registration form says **"Invalid URL"** | Privacy/terms URL without `https://` (reported by third-party guides, unverified) | Enter full `https://...` URLs |
-| `several accounts configured; pass --account (one of: …)` | More than one account and no `default_account` | Pass `--account <name>`, or set `default_account` at the top of `config.toml` |
+| `several accounts configured; pass --account (one of: …)` | More than one account and no `default_account` | Pass `--account <name>`, or set `default_account` at the top of the config file |
+| `no config file found` | Nothing at `./config.toml` or the per-user location, and the environment is incomplete | Run `enablebanking init` |
 | `unknown account 'x'; configured: …` | `--account` or `default_account` names no `[accounts.<name>]` table | Use one of the listed names. A `default_account` placed after a `[section]` belongs to that section and isn't seen: move it to the top |
 | `accounts 'a' and 'b' have the same IBAN` | One account configured twice | Remove one table |
 | `[✗] TRANSACTIONS` 400/422 with the 90-day hint | The bank limits history without a new SCA | Shorten the range, or `--fresh` for a new consent |

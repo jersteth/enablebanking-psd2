@@ -7,8 +7,8 @@ import pytest
 import respx
 
 from conftest import BASE, OTHER_IBAN, VALID_IBAN, load_fixture, session_record, write_config
-from psd2demo import cli
-from psd2demo.session_store import BankMeta, SessionStore
+from enablebanking_psd2 import cli
+from enablebanking_psd2.session_store import BankMeta, SessionStore
 from test_schema import validate
 
 
@@ -65,7 +65,10 @@ def test_output_file_and_cache(setup, capsys):
 def test_output_outside_exports_warns_and_write_failure_exits_1(setup, capsys):
     tmp_path, _ = setup
     assert cli.main(["history", "--account", "main", "--output", str(tmp_path / "h.json")]) == 0
-    assert "outside exports/" in capsys.readouterr().err
+    assert "git-ignored" not in capsys.readouterr().err  # not inside a git work tree: nothing to commit by accident
+    (tmp_path / ".git").mkdir()
+    assert cli.main(["history", "--account", "main", "--output", str(tmp_path / "h.json")]) == 0
+    assert "may not be git-ignored" in capsys.readouterr().err
     (tmp_path / "blocker").write_text("")
     assert cli.main(["history", "--account", "main", "--output", str(tmp_path / "blocker" / "h.json")]) == 1
     out = capsys.readouterr()
@@ -87,7 +90,7 @@ def test_ctrl_c_exits_130(monkeypatch, capsys):
     def interrupted(*a, **k):
         raise KeyboardInterrupt
 
-    monkeypatch.setattr("psd2demo.commands.fetch_history", interrupted)
+    monkeypatch.setattr("enablebanking_psd2.commands.fetch_history", interrupted)
     assert cli.main(["history"]) == 130
 
 
@@ -96,3 +99,37 @@ def test_parsing():
     assert args.cmd == "history" and args.account == ["a", "b"] and args.include == "balances,raw"
     with pytest.raises(SystemExit):
         cli.parse_args(["history", "--days", "3", "--from", "2026-01-01"])
+
+
+@respx.mock
+def test_save_writes_to_the_export_dir_and_prints_only_the_path(setup, capsys):
+    tmp_path, _ = setup
+    assert cli.main(["history", "--account", "main", "--save"]) == 0
+    out = capsys.readouterr()
+    target = tmp_path / "_home" / ".local" / "share" / "enablebanking-psd2" / "exports" / "history.json"
+    assert out.out == f"{target}\n"
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600 and stat.S_IMODE(target.parent.stat().st_mode) == 0o700
+    validate(json.loads(target.read_text()))
+
+
+@respx.mock
+def test_save_uses_a_legacy_exports_dir_and_configured_export_dir(setup, monkeypatch, capsys):
+    tmp_path, _ = setup
+    (tmp_path / "exports").mkdir()
+    assert cli.main(["history", "--account", "main", "--save"]) == 0
+    assert capsys.readouterr().out == f"{tmp_path / 'exports' / 'history.json'}\n"
+    monkeypatch.setenv("ENABLEBANKING_PSD2_EXPORT_DIR", str(tmp_path / "elsewhere"))
+    assert cli.main(["history", "--account", "main", "--save"]) == 0
+    assert capsys.readouterr().out == f"{tmp_path / 'elsewhere' / 'history.json'}\n"
+
+
+@respx.mock
+def test_save_failure_exits_1_and_save_with_output_is_a_usage_error(setup, monkeypatch, capsys):
+    tmp_path, _ = setup
+    (tmp_path / "blocker").write_text("")
+    monkeypatch.setenv("ENABLEBANKING_PSD2_EXPORT_DIR", str(tmp_path / "blocker" / "x"))
+    assert cli.main(["history", "--account", "main", "--save"]) == 1
+    assert "cannot write" in capsys.readouterr().err
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["history", "--save", "--output", str(tmp_path / "h.json")])
+    assert exc.value.code == 2

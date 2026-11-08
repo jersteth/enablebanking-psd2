@@ -11,12 +11,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from conftest import FOREIGN_IBAN, OTHER_IBAN, VALID_IBAN, load_fixture  # noqa: E402
-from psd2demo import contract  # noqa: E402
-from psd2demo.config import HISTORY_PARTS, AccountSpec  # noqa: E402
-from psd2demo.eb.models import Balance  # noqa: E402
-from psd2demo.transactions import normalize  # noqa: E402
+from enablebanking_psd2 import contract  # noqa: E402
+from enablebanking_psd2.config import HISTORY_PARTS, AccountSpec  # noqa: E402
+from enablebanking_psd2.eb.models import Balance  # noqa: E402
+from enablebanking_psd2.transactions import normalize  # noqa: E402
 
-EXAMPLE = Path(__file__).parent.parent / "schemas" / "account-history.v1.example.json"
+EXAMPLE = Path(__file__).parent.parent / "src" / "enablebanking_psd2" / "schemas" / "account-history.v1.example.json"
 GENERATED = datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc)
 FROM, TO = date(2026, 10, 9), date(2026, 11, 8)
 MAIN = AccountSpec("main", "KBC", "BE", VALID_IBAN)
@@ -41,7 +41,7 @@ def _ok_entry(include: frozenset[str], truncated: bool = False) -> dict:
 def _consent_required_entry(include: frozenset[str] = frozenset()) -> dict:
     return contract.account_entry(account=SAVINGS, status="consent_required", include=include,
                                   error=contract.error("SESSION", "consent required for account 'savings' (KBC)",
-                                                       hint="psd2-demo authorize --account savings"))
+                                                       hint="enablebanking authorize --account savings"))
 
 
 def scenarios() -> dict[str, dict]:

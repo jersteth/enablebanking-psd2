@@ -1,6 +1,6 @@
 import pytest
 
-from psd2demo.iban import mask, normalize, validate
+from enablebanking_psd2.iban import mask, normalize, validate
 
 
 @pytest.mark.parametrize("value", ["BE68539007547034", "NL91ABNA0417164300", "DE89370400440532013000"])
@@ -27,3 +27,20 @@ def test_mask():
     assert mask("BE68539007547034") == "BE68 **** **** 7034"
     assert "0417" not in mask("NL91ABNA0417164300")
     assert mask("NL91ABNA0417164300").endswith("4300")
+
+
+@pytest.mark.parametrize("value", [
+    "NL91ABNA0417164300", "DE89370400440532013000", "FR1420041010050500013M02606", "LU280019400644750000",
+    "MT84MALT011000012345MTLCAST001S", "NO9386011117947", "GB29NWBK60161331926819", "BE68539007547034"])
+def test_valid_ibans_of_other_countries(value):
+    validate(value)
+
+
+@pytest.mark.parametrize("value,match", [
+    ("NL91ABNA041716430", "must be 18 characters for NL"),
+    ("DE89370400440532013", "must be 22 characters for DE"),
+    ("NO93860111179470", "must be 15 characters for NO"),
+    ("NL92ABNA0417164300", "invalid checksum")])
+def test_wrong_length_or_checksum_is_rejected(value, match):
+    with pytest.raises(ValueError, match=match):
+        validate(value)

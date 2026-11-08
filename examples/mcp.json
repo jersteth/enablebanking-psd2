@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "enablebanking": {
+      "command": "uvx",
+      "args": ["--from", "enablebanking-psd2[mcp]", "enablebanking", "mcp"]
+    }
+  }
+}

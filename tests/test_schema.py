@@ -1,13 +1,13 @@
 import copy
 import json
-from pathlib import Path
 
 import jsonschema
 import pytest
 
+from enablebanking_psd2.contract import schema_path
 from history_docs import EXAMPLE, dump, example, scenarios
 
-SCHEMA = json.loads((Path(__file__).parent.parent / "schemas" / "account-history.v1.json").read_text())
+SCHEMA = json.loads(schema_path().read_text())
 VALIDATOR = jsonschema.Draft202012Validator(SCHEMA)
 
 

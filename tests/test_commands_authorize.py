@@ -2,10 +2,10 @@ from datetime import timedelta
 
 from conftest import (BOTH_KBC, NOW, THREE_ACCOUNTS, VALID_STATUS, FakeClient, cmd_args, make_cfg, make_ctx,
                       session_record)
-from psd2demo.commands import authorize
-from psd2demo.eb.errors import ApiNotFound, ApiServerError
-from psd2demo.eb.models import SessionStatus
-from psd2demo.session_store import BankMeta
+from enablebanking_psd2.commands import authorize
+from enablebanking_psd2.eb.errors import ApiNotFound, ApiServerError
+from enablebanking_psd2.eb.models import SessionStatus
+from enablebanking_psd2.session_store import BankMeta
 
 
 def _ctx(tmp_path, client=None):

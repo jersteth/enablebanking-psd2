@@ -7,10 +7,10 @@ import httpx
 import pytest
 
 from conftest import FOREIGN_IBAN, NOW, VALID_IBAN, VALID_STATUS, FakeClient, cmd_args, make_cfg, make_ctx, session_record
-from psd2demo.cache import HistoryCache
-from psd2demo.commands import sessions
-from psd2demo.eb.errors import ApiNotFound, ApiServerError, from_response
-from psd2demo.flow import Step
+from enablebanking_psd2.cache import HistoryCache
+from enablebanking_psd2.commands import sessions
+from enablebanking_psd2.eb.errors import ApiNotFound, ApiServerError, from_response
+from enablebanking_psd2.flow import Step
 
 CFG_ACCOUNTS = {"main": ("KBC", VALID_IBAN), "giro": ("Belfius", FOREIGN_IBAN)}
 

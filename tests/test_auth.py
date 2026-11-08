@@ -2,7 +2,7 @@ import jwt
 import pytest
 
 from conftest import APP_ID
-from psd2demo.eb.auth import JwtSigner
+from enablebanking_psd2.eb.auth import JwtSigner
 
 
 def test_header_and_claims(pem_bytes, rsa_key):

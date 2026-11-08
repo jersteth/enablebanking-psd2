@@ -2,9 +2,9 @@ import argparse
 from dataclasses import replace
 
 from conftest import FakeClient, load_fixture, make_cfg, make_ctx
-from psd2demo.commands import banks
-from psd2demo.eb.models import Aspsp
-from psd2demo.output import render_banks
+from enablebanking_psd2.commands import banks
+from enablebanking_psd2.eb.models import Aspsp
+from enablebanking_psd2.output import render_banks
 
 ALL = [Aspsp.from_json(a) for a in load_fixture("aspsps.json")["aspsps"]]
 
@@ -32,3 +32,12 @@ def test_render():
     assert "Psu-Ip-Address, Psu-User-Agent" in text and "180 d" in text
     assert lines[3].rstrip().endswith("beta")  # ING
     assert render_banks([]) == "No banks match."
+
+
+def test_country_defaults_to_the_configured_one(tmp_path):
+    no_accounts = replace(make_cfg(tmp_path), accounts={}, country="NL")
+    client = FakeClient(aspsps=ALL)
+    ctx, _, _ = make_ctx(tmp_path, client, no_accounts)
+    assert banks(ctx, argparse.Namespace(country=None, filter=None)).ok
+    assert banks(ctx, argparse.Namespace(country="de", filter=None)).ok
+    assert [c[1] for c in client.calls if c[0] == "aspsps"] == ["NL", "DE"]

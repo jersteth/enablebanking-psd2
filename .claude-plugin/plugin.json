@@ -1,0 +1,8 @@
+{
+  "name": "enablebanking-psd2",
+  "version": "0.2.0",
+  "description": "Read your own bank accounts (PSD2 via Enable Banking) from agents: history and setup skills",
+  "author": { "name": "Jeroen Ost" },
+  "repository": "https://github.com/jersteth/enablebanking-psd2",
+  "license": "Apache-2.0"
+}

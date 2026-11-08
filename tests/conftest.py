@@ -8,12 +8,12 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from psd2demo.cli import parse_args
-from psd2demo.config import AccountSpec, Config
-from psd2demo.eb.client import EnableBankingClient
-from psd2demo.eb.models import AccountDetails, Aspsp, AuthStart, Balance, Session, SessionStatus, TransactionsPage
-from psd2demo.flow import ConsentHooks, Context, StepReporter
-from psd2demo.session_store import SessionRecord, SessionStore, StoredAccount, iban_hash
+from enablebanking_psd2.cli import parse_args
+from enablebanking_psd2.config import AccountSpec, Config
+from enablebanking_psd2.eb.client import EnableBankingClient
+from enablebanking_psd2.eb.models import AccountDetails, Aspsp, AuthStart, Balance, Session, SessionStatus, TransactionsPage
+from enablebanking_psd2.flow import ConsentHooks, Context, StepReporter
+from enablebanking_psd2.session_store import SessionRecord, SessionStore, StoredAccount, iban_hash
 
 FIXTURES = Path(__file__).parent / "fixtures"
 VALID_IBAN = "BE68539007547034"  # published example IBANs only
@@ -127,7 +127,7 @@ def make_cfg(tmp_path, bank="KBC", iban=VALID_IBAN, *, accounts=None, **kwargs) 
     specs = accounts or {"main": (bank, iban)}
     accs = {name: AccountSpec(name, v[0], v[2] if len(v) > 2 else "BE", v[1]) for name, v in specs.items()}
     return Config(app_id=APP_ID, key_path=tmp_path / "k.pem", redirect_url="https://localhost/callback",
-                  accounts=accs, state_dir=tmp_path / ".psd2demo", **kwargs)
+                  accounts=accs, **{"state_dir": tmp_path / ".psd2demo", "export_dir": tmp_path / "exports", **kwargs})
 
 
 def make_store(tmp_path) -> SessionStore:
@@ -204,3 +204,14 @@ class PasteStdin:
     def readline(self):
         state = json.loads(self.auth_route.calls.last.request.content)["state"]
         return f"https://localhost/callback?code=C1&state={state}\n"
+
+
+@pytest.fixture(autouse=True)
+def isolated_user_dirs(tmp_path, monkeypatch):
+    """No test may read or write the real user's config/state/exports (XDG or ENABLEBANKING_PSD2_* locations)."""
+    home = tmp_path / "_home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    for var in ("XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_DATA_HOME", "APPDATA", "ENABLEBANKING_PSD2_CONFIG",
+                "ENABLEBANKING_PSD2_STATE_DIR", "ENABLEBANKING_PSD2_EXPORT_DIR"):
+        monkeypatch.delenv(var, raising=False)

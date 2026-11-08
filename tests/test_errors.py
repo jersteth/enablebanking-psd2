@@ -1,7 +1,7 @@
 import httpx
 
 from conftest import load_fixture
-from psd2demo.eb import errors
+from enablebanking_psd2.eb import errors
 
 
 def _resp(status, body=None, text=None):

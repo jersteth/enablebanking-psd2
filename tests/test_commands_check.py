@@ -1,12 +1,14 @@
 from contextlib import nullcontext
 
+from dataclasses import replace
+
 from conftest import BANKS, OTHER_IBAN, VALID_IBAN, FakeClient, cli_args, cmd_args, make_cfg, make_ctx
-from psd2demo import cli
-from psd2demo.commands import check
-from psd2demo.config import FIELDS, REQUIRED
-from psd2demo.eb.errors import ApiAuthError
-from psd2demo.eb.models import Aspsp
-from psd2demo.flow import Step, select_psu_headers
+from enablebanking_psd2 import cli
+from enablebanking_psd2.commands import check
+from enablebanking_psd2.config import FIELDS, REQUIRED
+from enablebanking_psd2.eb.errors import ApiAuthError
+from enablebanking_psd2.eb.models import Aspsp
+from enablebanking_psd2.flow import Step, select_psu_headers
 
 TWO_HEADERS = ["Psu-Ip-Address", "Psu-User-Agent"]
 
@@ -40,7 +42,7 @@ def test_api_auth_error(tmp_path):
 def test_without_account_checks_credentials_only(tmp_path):
     two = make_cfg(tmp_path, accounts={"a": ("KBC", VALID_IBAN), "b": ("KBC", OTHER_IBAN)})
     res, out, _ = _check(tmp_path, FakeClient(), two)
-    assert res.ok and "credentials ok, 3 Belgian banks (no account selected)" in out
+    assert res.ok and "credentials ok, 3 banks in BE (no account selected)" in out
     res, out, _ = _check(tmp_path, FakeClient(), two, "--account", "b")
     assert res.ok and res.summary["account"] == "b"
 
@@ -96,3 +98,9 @@ def test_cli_bad_key_is_config_error(tmp_path, monkeypatch, capsys):
     bad.chmod(0o600)
     assert cli.main(cli_args("check", bad)) == 2
     assert "cannot be loaded" in capsys.readouterr().err
+
+
+def test_without_account_uses_the_configured_country(tmp_path):
+    cfg = replace(make_cfg(tmp_path), accounts={}, country="NL")
+    res, out, client = _check(tmp_path, FakeClient(), cfg)
+    assert res.ok and "banks in NL" in out and ("aspsps", "NL") in client.calls

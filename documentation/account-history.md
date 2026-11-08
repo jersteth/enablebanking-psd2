@@ -1,13 +1,13 @@
 # Account History (unattended JSON export)
 
-`psd2-demo history` fetches the transaction history of **all configured accounts** without any interaction and writes one versioned JSON document. Applications run it on a schedule, Python code calls `fetch_history()`, and Claude Code uses it through the `bank-account-history` skill. Setup (Enable Banking app, accounts) is in [enablebanking-setup.md](./enablebanking-setup.md).
+`enablebanking history` fetches the transaction history of **all configured accounts** without any interaction and writes one versioned JSON document. Applications run it on a schedule, Python code calls `fetch_history()`, and Claude Code uses it through the `bank-account-history` skill. Setup (Enable Banking app, accounts) is in [enablebanking-setup.md](./enablebanking-setup.md).
 
 ## 1. Authorize once per bank
 Getting a PSD2 consent needs you at your bank (login plus strong authentication), so `history` can only use consents that already exist. Create them interactively:
 
 ```bash
-psd2-demo authorize            # every configured account; one bank login per bank
-psd2-demo authorize --status   # authorized / expiring (< 7 days) / consent_required per account
+enablebanking authorize            # every configured account; one bank login per bank
+enablebanking authorize --status   # authorized / expiring (< 7 days) / consent_required per account
 ```
 
 - One consent per bank covers all your configured accounts at that bank. Select all of them on the bank's consent screen.
@@ -15,14 +15,14 @@ psd2-demo authorize --status   # authorized / expiring (< 7 days) / consent_requ
 - Banks whose stored consent covers their accounts for more than 7 more days are skipped. `--fresh` renews anyway.
 - An account missing from the consent is reported as `missing`, with what to do: select it at the bank, or link it in the Enable Banking control panel.
 
-Renew before expiry: run `psd2-demo authorize --status` weekly (see the cron example), and `psd2-demo authorize` when something shows `expiring`.
+Renew before expiry: run `enablebanking authorize --status` weekly (see the cron example), and `enablebanking authorize` when something shows `expiring`.
 
 ## 2. Fetch
 ```bash
-psd2-demo history                                         # all accounts, [history] days (default 30)
-psd2-demo history --days 7 --account main                 # one account, last week
-psd2-demo history --from 2026-10-01 --to 2026-10-31       # a calendar month
-psd2-demo history --include balances,details --output exports/history.json
+enablebanking history                                         # all accounts, [history] days (default 30)
+enablebanking history --days 7 --account main                 # one account, last week
+enablebanking history --from 2026-10-01 --to 2026-10-31       # a calendar month
+enablebanking history --include balances,details --output exports/history.json
 ```
 
 | Option | Meaning |
@@ -30,7 +30,8 @@ psd2-demo history --include balances,details --output exports/history.json
 | `--account NAME` | only this account; repeatable. Default: all, in config order |
 | `--days N` / `--from D [--to D]` | the period; `--to` defaults to today. Default: `[history] days` |
 | `--include PARTS` | extra parts: `balances`, `details` (account resource), `raw` (each transaction's original API object); `none` = transactions only. Replaces `[history] include` |
-| `--output FILE` | write the JSON there (atomic, mode 0600) instead of stdout. A path outside `exports/` gets a warning, because it isn't git-ignored |
+| `--output FILE` | write the JSON there (atomic, mode 0600) instead of stdout. A path outside the export folder gets a warning when it is inside a git work tree |
+| `--save` | write the JSON to `<export folder>/history.json` (see the setup guide for where that is) and print only that path; excludes `--output`. This is what the agent skill uses |
 | `--max-age MIN` | use cached results up to MIN minutes old (default `[history] max_age`, 60) |
 | `--no-cache` | always call the API; neither read nor write the cache |
 | `--verbose` | per-account progress and HTTP debug lines (redacted) on stderr |
@@ -40,13 +41,13 @@ psd2-demo history --include balances,details --output exports/history.json
 **Exit codes:** `0` every account `ok`, `3` partial, `1` no account `ok`, `2` config or usage error (message on stderr, no document), `130` interrupted. For 0, 1 and 3 a complete document is always written. stdout carries only the JSON.
 
 ## 3. The JSON contract
-Schema: [`schemas/account-history.v1.json`](../schemas/account-history.v1.json) (JSON Schema 2020-12, strict: no extra keys). Example: [`schemas/account-history.v1.example.json`](../schemas/account-history.v1.example.json).
+Schema: [`account-history.v1.json`](../src/enablebanking_psd2/schemas/account-history.v1.json) (JSON Schema 2020-12, strict: no extra keys; shipped inside the package, `enablebanking_psd2.contract.schema_path()`). Example: [`account-history.v1.example.json`](../src/enablebanking_psd2/schemas/account-history.v1.example.json).
 
 ```jsonc
 {
   "schema_version": "1",
   "generated_at": "2026-11-08T12:00:00Z",
-  "tool": {"name": "psd2-demo", "version": "0.1.0"},
+  "tool": {"name": "enablebanking", "version": "0.1.0"},
   "range": {"date_from": "2026-10-09", "date_to": "2026-11-08"},
   "include": ["balances"],
   "accounts": [{
@@ -92,18 +93,18 @@ Without you present, PSD2 lets a bank cap account access at 4 requests per accou
 - one more each for balances and details
 
 So:
-- **The cache.** Each complete account result (one without warnings) is cached per (account, consent, period, parts) under `.psd2demo/cache/` (git-ignored, files 0600) and reused for `max_age` minutes. A run where everything is cached makes no network call at all, and shows `cached: true` and `api_calls: 0`. A new consent (`authorize`) starts a fresh cache. A revoked or expired consent is reported as `consent_required` before the cache is consulted.
+- **The cache.** Each complete account result (one without warnings) is cached per (account, consent, period, parts) under `cache/` in the state folder (`.psd2demo/` in a project folder, else `~/.local/state/enablebanking-psd2/`; files 0600) and reused for `max_age` minutes. A run where everything is cached makes no network call at all, and shows `cached: true` and `api_calls: 0`. A new consent (`authorize`) starts a fresh cache. A revoked or expired consent is reported as `consent_required` before the cache is consulted.
 - **Rate limiting (429).** A 429 on the session check or the transactions falls back to the account's cached result of any age, marked `cached: true, stale: true` with a warning; without a cache, the account is `rate_limited`. A 429 on balances or details keeps the transactions: that part is `null`, with a warning. `history` doesn't retry 429s, because a daily cap won't clear within a run.
 - **Shared consents.** Accounts at the same bank share one consent, which is checked once per run.
 - **Budgeting.** `api_calls` per account tells you what each run cost.
-- **Pruning.** `psd2-demo sessions prune` also deletes cache files older than 7 days.
+- **Pruning.** `enablebanking sessions prune` also deletes cache files older than 7 days.
 - **PSU headers.** If the bank's required PSU headers are configured (`psu_ip_address`), requests count as "you are present". See the PSU headers section of the setup guide.
 
 ## 5. Scheduling
 cron (daily at 07:00, plus a weekly consent check on Monday):
 ```cron
-0 7 * * *  cd /path/to/enablebanking-psd2 && .venv/bin/psd2-demo history --output exports/history.json; [ $? -le 3 ] || echo "history failed" | mail -s psd2 you@example.com
-0 9 * * 1  cd /path/to/enablebanking-psd2 && .venv/bin/psd2-demo authorize --status --json > exports/consents.json || echo "renew consents: psd2-demo authorize" | mail -s psd2 you@example.com
+0 7 * * *  enablebanking history --save > /dev/null; [ $? -le 3 ] || echo "history failed" | mail -s psd2 you@example.com
+0 9 * * 1  enablebanking authorize --status --json > ~/consents.json || echo "renew consents: enablebanking authorize" | mail -s psd2 you@example.com
 ```
 
 systemd user timer:
@@ -111,8 +112,7 @@ systemd user timer:
 # ~/.config/systemd/user/psd2-history.service
 [Service]
 Type=oneshot
-WorkingDirectory=%h/dev/enablebanking-psd2
-ExecStart=%h/dev/enablebanking-psd2/.venv/bin/psd2-demo history --output exports/history.json
+ExecStart=%h/.local/bin/enablebanking history --save
 SuccessExitStatus=3
 
 # ~/.config/systemd/user/psd2-history.timer
@@ -128,35 +128,35 @@ WantedBy=timers.target
 ```python
 from decimal import Decimal
 
-from psd2demo.history import fetch_history
+from enablebanking_psd2 import fetch_history
 
 doc = fetch_history(days=30, include=["balances"])          # same document as the CLI
 for account in doc["accounts"]:
     if account["status"] == "ok":
         spent = sum(Decimal(t["amount"]) for t in account["transactions"] if t["amount"].startswith("-"))
     elif account["status"] == "consent_required":
-        print(account["error"]["hint"])                      # psd2-demo authorize --account <name>
+        print(account["error"]["hint"])                      # enablebanking authorize --account <name>
 ```
 - **Arguments:** `config_path`, `accounts`, `days` / `date_from` / `date_to`, `include` (list or comma-separated string), `max_age`, `use_cache`.
-- **Behavior:** it reads `./config.toml` by default and keeps `.psd2demo/` relative to the working directory. It prints nothing.
-- **Errors:** it raises only `psd2demo.errors.ConfigError` (bad config, include, range or account name) and `KeyboardInterrupt`; everything per account is reported inside the document.
+- **Behavior:** it reads the config like the CLI (`./config.toml`, else the per-user config; see the setup guide), keeps its state in the same folders, and prints nothing. `consent_status()` returns the `authorize --status` rows without starting a consent.
+- **Errors:** it raises only `enablebanking_psd2.errors.ConfigError` (bad config, include, range or account name) and `KeyboardInterrupt`; everything per account is reported inside the document.
 
 ## 7. Claude Code skill
-`.claude/skills/bank-account-history/SKILL.md` is part of the repository, so Claude Code picks it up when started from the project directory. Ask in plain language, e.g. "what did I spend in the last 7 days?" or "balances of my accounts".
+`skills/bank-account-history/SKILL.md` ships as part of the Claude Code plugin (see [agent-integration.md](./agent-integration.md)); inside a checkout of this repository, Claude Code also finds it through `.claude/skills/`. Ask in plain language, e.g. "what did I spend in the last 7 days?" or "balances of my accounts".
 
 The skill:
-- runs `psd2-demo history`, writes to `exports/history.json`, and answers from that file
+- runs `enablebanking history --save` (the JSON goes to the export folder, the command prints the path) and answers from that file
 - uses the cache, and doesn't add `--no-cache`
-- tells you to run `psd2-demo authorize --account <name>` yourself when a consent is missing; it never runs the interactive login itself
+- tells you to run `! enablebanking authorize --account <name>` yourself when a consent is missing; it never runs the interactive login itself
 - doesn't print full IBANs or whole transaction lists unless asked, and never sends the data elsewhere
 
-Its `allowed-tools` pre-approves only `psd2-demo history` and reading files.
+Its `allowed-tools` pre-approves only `enablebanking history` and reading files.
 
 ## Troubleshooting
 | Symptom | Fix |
 |---|---|
-| Account `consent_required` | `psd2-demo authorize --account <name>` (interactive) |
-| `authorize` reports `missing` | Select the account on the bank's consent screen, or link it in the Enable Banking control panel; then `psd2-demo authorize --account <name> --fresh` |
+| Account `consent_required` | `enablebanking authorize --account <name>` (interactive) |
+| `authorize` reports `missing` | Select the account on the bank's consent screen, or link it in the Enable Banking control panel; then `enablebanking authorize --account <name> --fresh` |
 | `rate_limited`, or `stale: true` | You hit the bank's limit; rely on the cache, set `psu_ip_address`, and fetch less often |
 | `error` with step `TRANSACTIONS` and the 90-day hint | Shorten the period, or renew the consent (`authorize --fresh`) |
 | Exit 2 | Read the stderr message (unknown account, bad `--include`, bad period, invalid config) |

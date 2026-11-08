@@ -3,7 +3,7 @@ from decimal import Decimal
 import pytest
 
 from conftest import load_fixture
-from psd2demo.eb.models import (AccountDetails, Aspsp, AuthStart, Balance, Session, SessionStatus,
+from enablebanking_psd2.eb.models import (AccountDetails, Aspsp, AuthStart, Balance, Session, SessionStatus,
                                 TransactionsPage)
 
 

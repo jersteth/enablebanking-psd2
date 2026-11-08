@@ -3,11 +3,11 @@ from datetime import date, timedelta
 
 from conftest import (BOTH_KBC, NOW, THREE_ACCOUNTS, VALID_IBAN, VALID_STATUS, FakeClient, make_cfg, make_store,
                       session_record)
-from psd2demo.cache import HistoryCache
-from psd2demo.eb.errors import ApiNotFound, ApiRateLimited, ApiServerError
-from psd2demo.eb.models import TransactionsPage
-from psd2demo.history import HistoryRequest, build_document
-from psd2demo.session_store import BankMeta
+from enablebanking_psd2.cache import HistoryCache
+from enablebanking_psd2.eb.errors import ApiNotFound, ApiRateLimited, ApiServerError
+from enablebanking_psd2.eb.models import TransactionsPage
+from enablebanking_psd2.history import HistoryRequest, build_document
+from enablebanking_psd2.session_store import BankMeta
 from test_schema import validate
 
 KBC = session_record(accounts=BOTH_KBC, valid_until="2027-05-07T10:00:00+00:00", bank=BankMeta(15552000, ()))
@@ -38,7 +38,7 @@ def test_statuses_partial_run(tmp_path):
     doc, client, acc = _run(tmp_path)
     assert {n: a["status"] for n, a in acc.items()} == {"main": "ok", "savings": "ok", "giro": "consent_required"}
     assert doc["summary"]["accounts"] == {"ok": 2, "consent_required": 1, "rate_limited": 0, "error": 0}
-    assert acc["giro"]["error"]["hint"] == "psd2-demo authorize --account giro" and acc["giro"]["api_calls"] == 0
+    assert acc["giro"]["error"]["hint"] == "enablebanking authorize --account giro" and acc["giro"]["api_calls"] == 0
     assert acc["main"]["iban"] == VALID_IBAN and len(acc["main"]["transactions"]) == 4
     assert acc["main"]["session_valid_until"] == "2027-05-07T10:00:00+00:00" and not acc["main"]["cached"]
     assert not any(c[0] == "aspsps" for c in client.calls)  # bank rules come from the stored session
@@ -172,3 +172,31 @@ def test_reconsent_invalidates_the_cache(tmp_path):
     _run(tmp_path, req=_req(tmp_path, ["main"]))
     _, client, acc = _run(tmp_path, req=_req(tmp_path, ["main"]), records=(replace(KBC, session_id="new-session"),))
     assert not acc["main"]["cached"] and client.calls
+
+
+NL_IBAN = "NL91ABNA0417164300"
+
+
+def test_account_outside_belgium_with_other_currencies(tmp_path):
+    from enablebanking_psd2.session_store import StoredAccount, iban_hash
+    pages = [TransactionsPage.from_json({"transactions": [
+        {"entry_reference": "N1", "transaction_amount": {"currency": "USD", "amount": "12.50"},
+         "credit_debit_indicator": "DBIT", "status": "BOOK", "booking_date": "2026-10-20",
+         "creditor": {"name": "Coffee Co"}, "remittance_information": []},
+        {"entry_reference": "N2", "transaction_amount": {"currency": "EUR", "amount": "100.00"},
+         "credit_debit_indicator": "CRDT", "status": "BOOK", "booking_date": "2026-10-21",
+         "debtor": {"name": "Employer"}, "remittance_information": []}], "continuation_key": None})]
+    cfg = make_cfg(tmp_path, accounts={"nl": ("ING", NL_IBAN, "NL")})
+    store = make_store(tmp_path)
+    store.upsert(session_record(bank_name="ING", bank_country="NL", valid_until="2027-05-07T10:00:00+00:00",
+                                accounts=(StoredAccount("acc-uid-1", iban_hash(NL_IBAN)),),
+                                bank=BankMeta(15552000, ())))
+    client = FakeClient(pages=pages, session_status=VALID_STATUS)
+    req = HistoryRequest(accounts=tuple(cfg.select()), date_from=FROM, date_to=TO, include=frozenset(), max_age=60)
+    doc = build_document(cfg, lambda: client, store, HistoryCache(tmp_path / ".psd2demo" / "cache"), req, now=NOW)
+    validate(doc)
+    entry = doc["accounts"][0]
+    assert entry["status"] == "ok" and entry["country"] == "NL" and entry["iban"] == NL_IBAN
+    assert doc["summary"]["totals"] == {
+        "USD": {"count": 1, "credits": "+0", "debits": "-12.50", "net": "-12.50"},
+        "EUR": {"count": 1, "credits": "+100.00", "debits": "+0", "net": "+100.00"}}
