@@ -54,8 +54,10 @@ consent_days = 1
 # Seconds to wait for the bank redirect. env EB_CALLBACK_TIMEOUT, flag --callback-timeout (default 300)
 callback_timeout = 300
 
-# Used by `psd2-demo history` (spec 004).
+# Defaults for `psd2-demo history` and psd2demo.history.fetch_history() (documentation/account-history.md).
 [history]
-days = 30              # env EB_HISTORY_DAYS
-include = []           # any of "balances", "details", "raw"; env EB_HISTORY_INCLUDE (comma-separated)
-max_age = 60           # minutes a cached account result stays fresh; env EB_HISTORY_MAX_AGE
+days = 30              # period when no --days/--from is given; env EB_HISTORY_DAYS
+include = []           # extra parts: "balances", "details", "raw" (each costs bank requests);
+                       # env EB_HISTORY_INCLUDE (comma-separated); --include replaces it
+max_age = 60           # minutes a cached account result is reused (protects the 4/day unattended limit);
+                       # env EB_HISTORY_MAX_AGE; --no-cache bypasses the cache

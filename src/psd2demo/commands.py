@@ -7,22 +7,32 @@ Pattern: one ``try`` around the steps, ``except (DemoError, ApiError)`` → ``re
 from __future__ import annotations
 
 import argparse
+import json
+import sys
+from datetime import timedelta
 from pathlib import Path
 from typing import Callable
 
 from psd2demo import iban as iban_mod
+from psd2demo.cache import HistoryCache
 from psd2demo.consent import prompt_stderr
 from psd2demo.daterange import resolve_range
+from psd2demo.config import NO_ACCOUNTS, AccountSpec
 from psd2demo.eb.errors import ApiError, ApiNotFound
-from psd2demo.errors import DemoError, UsageError
-from psd2demo.flow import (DEFAULT_LOOKBACK_DAYS, AccountSession, CommandResult, Context, Step, bank_for,
-                           ensure_session, run_transactions, totals_json)
-from psd2demo.output import (balance_label, export_balances, export_json, flatten, render_accounts,
-                             render_balances, render_banks, render_details, render_sessions, render_summary,
-                             render_transactions)
+from psd2demo.errors import ConfigError, DemoError, UsageError
+from psd2demo.flow import (DEFAULT_LOOKBACK_DAYS, EXIT_CONFIG, EXIT_FAIL, EXIT_OK, EXIT_PARTIAL, AccountSession,
+                           CommandResult, Context, Step, bank_for, consent_bank, ensure_session, run_transactions,
+                           session_state, totals_json)
+from psd2demo.fileio import write_text_atomic
+from psd2demo.history import fetch_history
+from psd2demo.output import (export_balances, export_json, render_accounts,
+                             render_authorize, render_balances, render_banks, render_details, render_sessions,
+                             render_summary, render_transactions)
 from psd2demo.session_store import SessionRecord
 
 EXPORTS_DIR = Path("exports")
+CACHE_RETENTION = timedelta(days=7)
+RENEW_WITHIN = timedelta(days=7)  # authorize renews consents that expire sooner than this
 
 
 def _account_session(ctx: Context, args: argparse.Namespace) -> AccountSession:
@@ -36,12 +46,18 @@ def _meta(s: AccountSession) -> dict:
             "iban_masked": iban_mod.mask(s.account.iban)}
 
 
+def _outside_exports_note(path: Path) -> str | None:
+    """A warning when ``path`` is not under the git-ignored exports/ directory."""
+    if EXPORTS_DIR.resolve() in path.resolve().parents:
+        return None
+    return f"note: {path} is outside exports/, so it is not git-ignored; it contains personal financial data"
+
+
 def _export(ctx: Context, path: Path, write: Callable[[Path], None], result: CommandResult) -> CommandResult:
     """EXPORT step: write the file; a failure fails the command but keeps its rendered output."""
     ctx.step = Step.EXPORT
-    if EXPORTS_DIR.resolve() not in path.resolve().parents:
-        ctx.reporter.notice(f"note: {path} is outside exports/, so it is not git-ignored; "
-                            "it contains personal financial data")
+    if note := _outside_exports_note(path):
+        ctx.reporter.notice(note)
     try:
         write(path)
     except OSError as exc:
@@ -114,7 +130,7 @@ def balances(ctx: Context, args: argparse.Namespace) -> CommandResult:
         return ctx.reporter.fail(ctx.step, exc)
     ctx.reporter.ok(Step.BALANCES, f"{len(found)} balance(s)" if found else "the bank returned no balances")
     meta = _meta(session)
-    summary = {**meta, "balances": [{"type": b.balance_type, "type_label": balance_label(b.balance_type) or None,
+    summary = {**meta, "balances": [{"type": b.balance_type, "type_label": b.type_label,
                                      "name": b.name, "amount": b.amount, "currency": b.currency,
                                      "reference_date": b.reference_date, "last_change": b.last_change}
                                     for b in found]}
@@ -131,8 +147,8 @@ def accounts(ctx: Context, args: argparse.Namespace) -> CommandResult:
         details = None
         if args.details:
             ctx.step = Step.DETAILS
-            raw = ctx.client.get_account_details(session.uid).raw
-            details = {k: iban_mod.mask_others(v, session.account.iban) for k, v in flatten(raw).items()}
+            raw = ctx.client.get_account_details(session.uid).flattened()
+            details = {k: iban_mod.mask_others(v, session.account.iban) for k, v in raw.items()}
             ctx.reporter.ok(Step.DETAILS, f"{len(details)} field(s)")
     except (DemoError, ApiError) as exc:
         return ctx.reporter.fail(ctx.step, exc)
@@ -226,8 +242,105 @@ def sessions_prune(ctx: Context, args: argparse.Namespace) -> CommandResult:
     """Delete local records that are revoked or expired; no API calls."""
     ctx.step = Step.SESSIONS
     removed = ctx.store.remove(lambda r: r.local_status(ctx.now) != "active")
-    ctx.reporter.ok(Step.SESSIONS, f"removed {removed} revoked or expired session(s)")
-    return CommandResult(ok=True, summary={"removed": removed})
+    cached = HistoryCache(ctx.cfg.state_dir / "cache").prune(CACHE_RETENTION, ctx.now)
+    ctx.reporter.ok(Step.SESSIONS, f"removed {removed} revoked or expired session(s), {cached} old cache file(s)")
+    return CommandResult(ok=True, summary={"removed": removed, "cache_files_removed": cached})
+
+
+def _by_bank(accounts: list[AccountSpec]) -> dict[tuple[str, str], list[AccountSpec]]:
+    groups: dict[tuple[str, str], list[AccountSpec]] = {}
+    for a in accounts:
+        groups.setdefault((a.bank_name.casefold(), a.bank_country), []).append(a)
+    return groups
+
+
+def _status_row(account: AccountSpec, rec: SessionRecord | None, status: str) -> dict:
+    return {"account": account.name, "bank": account.bank_name, "iban_masked": iban_mod.mask(account.iban),
+            "status": status, "valid_until": rec.valid_until if rec else None}
+
+
+def _authorize_status(ctx: Context, targets: list[AccountSpec]) -> tuple[list[dict], bool]:
+    """authorized / expiring (< 7 days) / consent_required / unknown, from the store + one GET /sessions per bank."""
+    ctx.step = Step.SESSIONS
+    rows = []
+    for account in targets:
+        rec = ctx.store.for_account(ctx.cfg.app_id, account)
+        try:
+            status = ("authorized" if session_state(ctx, rec, account.iban, RENEW_WITHIN)
+                      else "expiring" if session_state(ctx, rec, account.iban) else "consent_required")
+        except ApiError as exc:
+            status = f"unknown ({exc.status or exc.message})"
+        rows.append(_status_row(account, rec, status))
+    ctx.reporter.ok(Step.SESSIONS, f"{len(rows)} account(s)")
+    return rows, all(r["status"] in ("authorized", "expiring") for r in rows)
+
+
+def _authorize_bank(ctx: Context, group: list[AccountSpec], args: argparse.Namespace) -> tuple[list[dict], bool]:
+    """One consent for this bank's accounts, unless the stored one covers them for more than RENEW_WITHIN."""
+    rec = ctx.store.for_bank(ctx.cfg.app_id, group[0].bank_name, group[0].bank_country)
+    if not args.fresh and rec and rec.valid_at(ctx.now, RENEW_WITHIN) and all(rec.account_uid(a.iban) for a in group):
+        ctx.reporter.ok(Step.CONSENT, f"{rec.bank_name}: consent valid until {rec.valid_until}, skipped")
+        return [_status_row(a, rec, "authorized") for a in group], True
+    try:
+        rec, _ = consent_bank(ctx, group[0], args.consent_days or "max")
+    except (DemoError, ApiError) as exc:
+        ctx.reporter.fail(ctx.step, exc)
+        return [_status_row(a, None, "failed") for a in group], False
+    rows = []
+    for a in group:
+        covered = rec.account_uid(a.iban) is not None
+        rows.append(_status_row(a, rec, "authorized" if covered else "missing"))
+        if not covered:
+            ctx.reporter.notice(f"{a.name} {iban_mod.mask(a.iban)} is not in the {a.bank_name} consent: select it "
+                                "at the bank, or link it in the Enable Banking control panel, then rerun "
+                                f"psd2-demo authorize --account {a.name} --fresh")
+    return rows, all(r["status"] == "authorized" for r in rows)
+
+
+def authorize(ctx: Context, args: argparse.Namespace) -> CommandResult:
+    """One interactive consent per bank, covering every selected account there, for the bank's maximum validity
+    (or --consent-days). --status only reports, starting no consent."""
+    try:
+        targets = ctx.cfg.select(args.account)
+    except (DemoError, ApiError) as exc:
+        return ctx.reporter.fail(ctx.step, exc)
+    if not targets:
+        return ctx.reporter.fail(ctx.step, UsageError(NO_ACCOUNTS))
+    if args.status:
+        rows, ok = _authorize_status(ctx, targets)
+    else:
+        rows, ok = [], True
+        for group in _by_bank(targets).values():
+            group_rows, group_ok = _authorize_bank(ctx, group, args)
+            rows += group_rows
+            ok = ok and group_ok
+    return CommandResult(ok=ok, failed_step=None if ok else ctx.step, exit_code=EXIT_OK if ok else EXIT_FAIL,
+                         summary={"accounts": rows}, render=lambda: render_authorize(rows))
+
+
+def history(args: argparse.Namespace) -> int:
+    """Non-interactive history of the configured accounts as JSON (stdout, or --output). Returns the exit code:
+    0 all accounts ok, 3 some, 1 none; 2 config/usage error (no document)."""
+    try:
+        doc = fetch_history(args.config, accounts=args.account, days=args.days, date_from=args.date_from,
+                            date_to=args.date_to, include=args.include, max_age=args.max_age,
+                            use_cache=not args.no_cache, progress=sys.stderr if args.verbose else None)
+    except ConfigError as exc:
+        print(f"error: {exc.message}", file=sys.stderr)
+        return EXIT_CONFIG
+    text = json.dumps(doc, indent=2, ensure_ascii=False) + "\n"
+    if args.output:
+        if note := _outside_exports_note(args.output):
+            print(note, file=sys.stderr)
+        try:
+            write_text_atomic(args.output, text)
+        except OSError as exc:
+            print(f"error: cannot write {args.output}: {exc.strerror or exc}", file=sys.stderr)
+            return EXIT_FAIL
+    else:
+        sys.stdout.write(text)
+    ok = doc["summary"]["accounts"]["ok"]
+    return EXIT_OK if ok == len(doc["accounts"]) else EXIT_FAIL if ok == 0 else EXIT_PARTIAL
 
 
 SESSION_ACTIONS = {"list": sessions_list, "revoke": sessions_revoke, "prune": sessions_prune}
@@ -244,4 +357,5 @@ COMMANDS: dict[str, Callable[[Context, argparse.Namespace], CommandResult]] = {
     "balances": balances,
     "accounts": accounts,
     "sessions": sessions,
+    "authorize": authorize,
 }

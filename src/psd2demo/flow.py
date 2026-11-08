@@ -13,7 +13,7 @@ from psd2demo import iban as iban_mod
 from psd2demo.config import AccountSpec, Config
 from psd2demo.eb.client import EnableBankingClient
 from psd2demo.eb.errors import ApiAuthError, ApiError, ApiNotFound
-from psd2demo.eb.models import Account, Aspsp, TransactionsPage
+from psd2demo.eb.models import Account, Aspsp, SessionStatus, TransactionsPage
 from psd2demo.errors import AccountNotFound, BankNotFound, ConfigError, DemoError, UsageError
 from psd2demo.session_store import BankMeta, SessionRecord, SessionStore, StoredAccount, iban_hash
 from psd2demo.transactions import Summary, Txn, normalize, sort_txns, summarize
@@ -37,7 +37,7 @@ class Step(Enum):
     EXPORT = "EXPORT"
 
 
-EXIT_OK, EXIT_FAIL, EXIT_CONFIG, EXIT_INTERRUPT = 0, 1, 2, 130
+EXIT_OK, EXIT_FAIL, EXIT_CONFIG, EXIT_PARTIAL, EXIT_INTERRUPT = 0, 1, 2, 3, 130  # 3: history, some accounts ok
 
 
 @dataclass
@@ -113,11 +113,12 @@ class Context:
     client: EnableBankingClient
     store: SessionStore
     reporter: StepReporter
-    hooks: ConsentHooks
     today: date
     now: datetime
+    hooks: ConsentHooks | None = None  # None: non-interactive (history); a consent raises ConsentRequired
     step: Step = Step.CONFIG
     base_psu_headers: dict[str, str] = field(init=False)  # every PSU header we could send
+    live_sessions: dict = field(init=False, default_factory=dict)  # session_id → SessionStatus | ApiError
 
     def __post_init__(self):
         self.base_psu_headers = dict(self.client.psu_headers)
@@ -195,17 +196,31 @@ def _masked(a: Account) -> str:
     return iban_mod.mask(iban_mod.normalize(a.iban))
 
 
-def _usable(ctx: Context, rec: SessionRecord | None, iban: str) -> str | None:
-    """The account uid if ``rec`` is still usable for ``iban`` (local validity, then GET /sessions)."""
+def live_session(ctx: Context, session_id: str) -> SessionStatus | None:
+    """GET /sessions/{id} once per context (accounts of one bank share a session); None if gone (401/403/404).
+    Other API errors are raised, also on repeated lookups."""
+    if session_id not in ctx.live_sessions:
+        try:
+            ctx.live_sessions[session_id] = ctx.client.get_session(session_id)
+        except (ApiAuthError, ApiNotFound):
+            ctx.live_sessions[session_id] = None
+        except ApiError as exc:
+            ctx.live_sessions[session_id] = exc
+    result = ctx.live_sessions[session_id]
+    if isinstance(result, ApiError):
+        raise result
+    return result
+
+
+def session_state(ctx: Context, rec: SessionRecord | None, iban: str,
+                  margin: timedelta = REUSE_MIN_REMAINING) -> str | None:
+    """The account uid if ``rec`` is usable for ``iban`` for at least ``margin`` (locally, then live), else None."""
     uid = rec.account_uid(iban) if rec else None
-    if not uid or not rec.valid_at(ctx.now, REUSE_MIN_REMAINING):
+    if not uid or not rec.valid_at(ctx.now, margin):
         return None
-    try:
-        status = ctx.client.get_session(rec.session_id)
-    except (ApiAuthError, ApiNotFound):
-        return None
-    if (status.status != "AUTHORIZED" or status.valid_until is None
-            or status.valid_until <= ctx.now + REUSE_MIN_REMAINING or uid not in status.account_uids):
+    live = live_session(ctx, rec.session_id)
+    if (live is None or live.status != "AUTHORIZED" or live.valid_until is None
+            or live.valid_until <= ctx.now + margin or uid not in live.account_uids):
         return None
     return uid
 
@@ -242,6 +257,15 @@ def _consent(ctx: Context, bank: Aspsp, consent_days: int | Literal["max"] | Non
     return record, session.accounts
 
 
+def consent_bank(ctx: Context, account: AccountSpec, consent_days: int | Literal["max"] | None = None, *,
+                 bank: Aspsp | None = None) -> tuple[SessionRecord, list[Account]]:
+    """Interactive consent at ``account``'s bank, stored as that bank's record (covering every account the user
+    selected at the bank). No account matching: callers check which accounts the record covers."""
+    bank = bank or bank_for(ctx, account)
+    ctx.step = Step.CONSENT
+    return _consent(ctx, bank, consent_days)
+
+
 def ensure_session(ctx: Context, account: AccountSpec, *, interactive: bool = True, fresh: bool = False,
                    consent_days: int | Literal["max"] | None = None) -> AccountSession:
     """BANK → CONSENT (reuse the bank's session, or a new consent if interactive) → ACCOUNT.
@@ -261,17 +285,14 @@ def ensure_session(ctx: Context, account: AccountSpec, *, interactive: bool = Tr
         bank = bank_for(ctx, account)
 
     ctx.step = Step.CONSENT
-    uid = None if fresh else _usable(ctx, rec, account.iban)
+    uid = None if fresh else session_state(ctx, rec, account.iban)
     if uid:
         ctx.reporter.ok(Step.CONSENT, f"reused session valid until {rec.valid_until}")
         ctx.reporter.ok(Step.ACCOUNT, f"{account.name} {masked} (uid {uid})")
         return AccountSession(account, rec, uid, reused=True)
-    if not interactive:
+    if not interactive or ctx.hooks is None:
         raise ConsentRequired(account)
-    bank = bank or bank_for(ctx, account)
-    ctx.step = Step.CONSENT
-
-    rec, session_accounts = _consent(ctx, bank, consent_days)
+    rec, session_accounts = consent_bank(ctx, account, consent_days, bank=bank)
     ctx.step = Step.ACCOUNT
     match = next((a for a in session_accounts if a.iban and iban_mod.normalize(a.iban) == account.iban), None)
     if match is None:
@@ -283,7 +304,10 @@ def ensure_session(ctx: Context, account: AccountSpec, *, interactive: bool = Tr
     return AccountSession(account, rec, match.uid, reused=False)
 
 
-def run_transactions(ctx: Context, a: AccountSession, date_from: date, date_to: date) -> TxnResult:
+def fetch_transactions(ctx: Context, a: AccountSession, date_from: date, date_to: date
+                       ) -> tuple[list[TransactionsPage], list[dict], list[Txn]]:
+    """TRANSACTIONS step body: (pages, raw transactions, normalized transactions), both lists in API order.
+    A 400/422 without a more specific hint gets the history-limit hint."""
     ctx.step = Step.TRANSACTIONS
     try:
         pages = list(ctx.client.iter_transactions(a.uid, date_from, date_to))
@@ -291,7 +315,13 @@ def run_transactions(ctx: Context, a: AccountSession, date_from: date, date_to: 
         if exc.status in (400, 422) and exc.hint is None:
             exc.hint = RANGE_HINT
         raise
-    txns = sort_txns([normalize(t, date_from, date_to) for p in pages for t in p.transactions])
+    raws = [t for p in pages for t in p.transactions]
+    return pages, raws, [normalize(t, date_from, date_to) for t in raws]
+
+
+def run_transactions(ctx: Context, a: AccountSession, date_from: date, date_to: date) -> TxnResult:
+    pages, _, txns = fetch_transactions(ctx, a, date_from, date_to)
+    txns = sort_txns(txns)
     detail = (f"{len(txns)} transactions" if txns else "no transactions in range") + \
         f" {date_from.isoformat()}..{date_to.isoformat()}, {len(pages)} page(s)"
     if pages and pages[-1].truncated:

@@ -25,8 +25,11 @@ psd2-demo banks --filter kbc          # bank names, BIC, consent limits, require
 psd2-demo sessions                    # stored consents; `sessions revoke --account main` closes one
 psd2-demo run --account savings       # with several [accounts.<name>] in config.toml
 psd2-demo run --fresh --export exports/run.json --json
+psd2-demo authorize                   # once per bank, for unattended use (~180-day consent)
+psd2-demo history --days 30 --output exports/history.json   # all accounts → versioned JSON (exit 0/3/1)
 ```
-Exit code: `0` pass, `1` a step failed, `2` configuration or usage error, `130` interrupted.
+Applications: `psd2demo.history.fetch_history()` returns the same document; schema in `schemas/account-history.v1.json`. In Claude Code, the `bank-account-history` skill answers questions such as "what did I spend last week?". See [documentation/account-history.md](documentation/account-history.md).
+Exit code: `0` pass, `1` a step failed, `2` configuration or usage error, `130` interrupted (`history`: `3` = some accounts ok).
 
 ## Test
 ```bash

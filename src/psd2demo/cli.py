@@ -8,14 +8,14 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 from psd2demo import __version__
-from psd2demo.commands import COMMANDS
+from psd2demo.commands import COMMANDS, history
 from psd2demo.config import ACCOUNT_KEYS, FIELDS, Config, load_config
 from psd2demo.daterange import iso_date
+from psd2demo.bootstrap import load_signer, make_client
 from psd2demo.eb.auth import JwtSigner
-from psd2demo.eb.client import EnableBankingClient
 from psd2demo.errors import ConfigError
 from psd2demo.flow import EXIT_INTERRUPT, CommandResult, ConsentHooks, Context, Step, StepReporter, default_capture
-from psd2demo.log import http_event_hooks, set_own_ibans, setup_logging
+from psd2demo.log import set_own_ibans, setup_logging
 from psd2demo.session_store import SessionStore
 
 def _common(suppress: bool = False) -> argparse.ArgumentParser:
@@ -35,6 +35,16 @@ def _common(suppress: bool = False) -> argparse.ArgumentParser:
     return common
 
 
+def _period(title: str) -> argparse.ArgumentParser:
+    period = argparse.ArgumentParser(add_help=False)
+    g = period.add_argument_group(title)
+    x = g.add_mutually_exclusive_group()
+    x.add_argument("--days", type=int, help="the last N days")
+    x.add_argument("--from", dest="date_from", type=iso_date, metavar="YYYY-MM-DD")
+    g.add_argument("--to", dest="date_to", type=iso_date, metavar="YYYY-MM-DD", help="default: today")
+    return period
+
+
 def _parents() -> dict[str, argparse.ArgumentParser]:
     common = _common()
     account = argparse.ArgumentParser(add_help=False)
@@ -51,12 +61,7 @@ def _parents() -> dict[str, argparse.ArgumentParser]:
     g.add_argument("--consent-days", type=int)
     g.add_argument("--callback-timeout", type=int)
 
-    period = argparse.ArgumentParser(add_help=False)
-    g = period.add_argument_group("period (default: last 10 days)")
-    x = g.add_mutually_exclusive_group()
-    x.add_argument("--days", type=int, help="the last N days")
-    x.add_argument("--from", dest="date_from", type=iso_date, metavar="YYYY-MM-DD")
-    g.add_argument("--to", dest="date_to", type=iso_date, metavar="YYYY-MM-DD", help="default: today")
+    period = _period("period (default: last 10 days)")
     return {"common": common, "account": account, "consent": consent, "period": period}
 
 
@@ -125,6 +130,34 @@ def build_parser() -> argparse.ArgumentParser:
     target.add_argument("--all", action="store_true", help="every active stored session (asks to confirm)")
     revoke.add_argument("--yes", action="store_true", help="don't ask for confirmation with --all")
     actions.add_parser("prune", parents=[nested], help="delete revoked or expired local records")
+    auth = sub.add_parser("authorize", parents=[p["common"], p["consent"]], formatter_class=fmt,
+                          help="consent once per bank for unattended use (history); --status to check",
+                          epilog="Examples:\n  psd2-demo authorize --status\n  psd2-demo authorize\n"
+                                 "  psd2-demo authorize --account main --fresh --consent-days 30")
+    who = auth.add_mutually_exclusive_group()
+    who.add_argument("--account", action="append", metavar="NAME", help="this account (repeatable; default: all)")
+    who.add_argument("--all", action="store_true", help="every configured account (the default)")
+    auth.add_argument("--status", action="store_true",
+                      help="show authorized / expiring / consent_required per account; starts no consent")
+    auth.set_defaults(cmd="authorize")
+    hist = sub.add_parser("history", parents=[_period("period (default: [history] days, else 30)")],
+                          formatter_class=fmt,
+                          help="non-interactive history of all configured accounts as JSON (needs authorize)",
+                          epilog="Exit codes: 0 all accounts ok, 3 some, 1 none, 2 config/usage error.\n"
+                                 "Examples:\n  psd2-demo history\n  psd2-demo history --days 30 --include balances,details "
+                                 "--output exports/history.json\n  psd2-demo history --account main --no-cache")
+    hist.add_argument("--config", type=Path, help="TOML config file (default ./config.toml)")
+    hist.add_argument("--account", action="append", metavar="NAME", help="this account (repeatable; default: all)")
+    hist.add_argument("--include", metavar="PARTS",
+                      help="comma-separated: balances, details, raw; 'none' for transactions only "
+                           "(default: [history] include)")
+    hist.add_argument("--output", type=Path, metavar="FILE", help="write the JSON here (atomic, mode 0600)")
+    hist.add_argument("--max-age", type=int, metavar="MIN", help="use cached results up to MIN minutes old "
+                                                                  "(default: [history] max_age)")
+    hist.add_argument("--no-cache", action="store_true", help="always call the API; don't read or write the cache")
+    hist.add_argument("--verbose", "-v", action="store_true", help="per-account progress and HTTP debug on stderr")
+    hist.add_argument("--json", action="store_true", help="accepted for symmetry; output is always JSON")
+    hist.set_defaults(cmd="history")
     parser.command_names = set(sub.choices)  # names and aliases, for the default-command rule
     return parser
 
@@ -136,21 +169,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def make_client(cfg: Config, signer: JwtSigner) -> EnableBankingClient:
-    psu = {"Psu-User-Agent": f"psd2-demo/{__version__}"}
-    if cfg.psu_ip_address:
-        psu["Psu-Ip-Address"] = cfg.psu_ip_address
-    return EnableBankingClient(signer, psu_headers=psu, event_hooks=http_event_hooks())
-
-
 def _load(args: argparse.Namespace) -> tuple[Config, JwtSigner]:
     overrides = {k: getattr(args, k, None) for k in (*FIELDS, *ACCOUNT_KEYS)}
     cfg = load_config(args.config, os.environ, overrides)
-    try:
-        signer = JwtSigner(cfg.app_id, cfg.key_path.read_bytes())
-    except Exception as exc:  # bad PEM, encrypted key, unsupported key type
-        raise ConfigError([f"private key {cfg.key_path} cannot be loaded: {exc}"]) from exc
-    return cfg, signer
+    return cfg, load_signer(cfg)
 
 
 def _execute(args: argparse.Namespace, reporter: StepReporter) -> CommandResult:
@@ -171,6 +193,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         args = parse_args(sys.argv[1:] if argv is None else argv)
         setup_logging(args.verbose)
+        if args.cmd == "history":
+            return history(args)
         reporter = StepReporter(quiet=args.json)
         result = _execute(args, reporter)
         if args.json:

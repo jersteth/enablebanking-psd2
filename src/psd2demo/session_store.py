@@ -8,7 +8,6 @@ import hashlib
 import json
 import logging
 import os
-import tempfile
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -16,6 +15,7 @@ from typing import Callable, Literal
 
 from psd2demo import iban as iban_mod
 from psd2demo.config import AccountSpec
+from psd2demo.fileio import write_text_atomic
 
 log = logging.getLogger(__name__)
 SCHEMA_VERSION = 2
@@ -155,12 +155,5 @@ class SessionStore:
             os.replace(self.path, backup)
             log.warning("unreadable session file kept as %s", backup)
             self._unreadable = False
-        fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=".session-", suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w") as fh:  # mkstemp creates the file with mode 0600
-                json.dump({"schema_version": SCHEMA_VERSION, "sessions": [r.to_json() for r in records]},
-                          fh, indent=2)
-            os.replace(tmp, self.path)
-        except BaseException:
-            Path(tmp).unlink(missing_ok=True)
-            raise
+        write_text_atomic(self.path, json.dumps(
+            {"schema_version": SCHEMA_VERSION, "sessions": [r.to_json() for r in records]}, indent=2))

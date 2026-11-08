@@ -110,6 +110,30 @@ class TransactionsPage:
                    raw=d)
 
 
+# ISO 20022 balance types: readable labels for the common codes.
+BALANCE_LABELS = {
+    "CLBD": "closing booked", "ITAV": "interim available", "ITBD": "interim booked", "XPCD": "expected",
+    "CLAV": "closing available", "OPBD": "opening booked", "FWAV": "forward available",
+}
+
+
+def flatten(data, prefix: str = "") -> dict[str, str]:
+    """Nested dicts become ``a.b`` keys, lists are joined with ", "; empty values are dropped."""
+    out: dict[str, str] = {}
+    if isinstance(data, dict):
+        for k, v in data.items():
+            out.update(flatten(v, f"{prefix}.{k}" if prefix else str(k)))
+    elif isinstance(data, list):
+        parts = [", ".join(f"{k}={v}" for k, v in flatten(x).items()) if isinstance(x, (dict, list)) else str(x)
+                 for x in data if x not in (None, "", [], {})]
+        if parts:
+            out[prefix] = "; ".join(parts)
+    elif data not in (None, ""):
+        out[prefix] = str(data)
+    return out
+
+
+
 def _decimal(value) -> Decimal | None:
     try:
         return Decimal(str(value)) if value is not None else None
@@ -127,6 +151,10 @@ class Balance:
     last_change: datetime | None
     last_committed_transaction: str | None
 
+    @property
+    def type_label(self) -> str | None:
+        return BALANCE_LABELS.get(self.balance_type or "")
+
     @classmethod
     def from_json(cls, d: dict) -> "Balance":
         if not isinstance(d, dict):
@@ -143,6 +171,9 @@ class Balance:
 class AccountDetails:
     """Account resource; the fields vary per bank, so the raw object is kept and flattened for display."""
     raw: dict
+
+    def flattened(self) -> dict[str, str]:
+        return flatten(self.raw)
 
     @classmethod
     def from_json(cls, d: dict) -> "AccountDetails":

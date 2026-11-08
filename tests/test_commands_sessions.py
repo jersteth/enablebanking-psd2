@@ -1,10 +1,13 @@
 import io
+import os
+from datetime import timedelta
 
 import httpx
 
 import pytest
 
-from conftest import FOREIGN_IBAN, VALID_IBAN, VALID_STATUS, FakeClient, cmd_args, make_cfg, make_ctx, session_record
+from conftest import FOREIGN_IBAN, NOW, VALID_IBAN, VALID_STATUS, FakeClient, cmd_args, make_cfg, make_ctx, session_record
+from psd2demo.cache import HistoryCache
 from psd2demo.commands import sessions
 from psd2demo.eb.errors import ApiNotFound, ApiServerError, from_response
 from psd2demo.flow import Step
@@ -98,5 +101,17 @@ def test_prune(tmp_path):
     ctx, out, client = _ctx(tmp_path)
     ctx.store.mark_revoked(ctx.store.for_bank(ctx.cfg.app_id, "Belfius", "BE"))
     res = sessions(ctx, _args("prune"))
-    assert res.summary == {"removed": 2} and [r.bank_name for r in ctx.store.records()] == ["KBC"]
+    assert res.summary == {"removed": 2, "cache_files_removed": 0}
+    assert [r.bank_name for r in ctx.store.records()] == ["KBC"]
     assert client.calls == []
+
+
+def test_prune_also_removes_old_cache_files(tmp_path):
+    ctx, _, _ = _ctx(tmp_path)
+    cache = HistoryCache(ctx.cfg.state_dir / "cache")
+    cache.put("old", {}, NOW)
+    cache.put("fresh", {}, NOW)
+    stamp = (NOW - timedelta(days=8)).timestamp()
+    os.utime(cache.directory / "old.json", (stamp, stamp))
+    res = sessions(ctx, _args("prune"))
+    assert res.summary["cache_files_removed"] == 1 and [p.stem for p in cache.directory.iterdir()] == ["fresh"]

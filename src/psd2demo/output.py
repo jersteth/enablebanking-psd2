@@ -1,7 +1,6 @@
 """Human-readable rendering of transactions and summary."""
 
 import json
-import os
 import shutil
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -9,15 +8,12 @@ from decimal import Decimal
 from pathlib import Path
 
 from psd2demo.eb.models import Aspsp, Balance
+from psd2demo.fileio import write_text_atomic
 from psd2demo.transactions import Summary, Txn
 
 COLUMNS = ("Booked", "Value", "Amount", "Cur", "Counterparty", "Counterparty IBAN", "Remittance", "Status", "Ref")
 REMITTANCE = COLUMNS.index("Remittance")
 MIN_REMITTANCE = 10
-BALANCE_LABELS = {
-    "CLBD": "closing booked", "ITAV": "interim available", "ITBD": "interim booked", "XPCD": "expected",
-    "CLAV": "closing available", "OPBD": "opening booked", "FWAV": "forward available",
-}
 
 
 def _fmt_amount(amount: Decimal | None) -> str:
@@ -79,12 +75,8 @@ def render_summary(summary: dict[str, Summary]) -> str:
 
 
 def write_json(path: Path, payload: dict) -> None:
-    """Write ``payload`` as JSON with file mode 0600, creating the parent directory."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    os.fchmod(fd, 0o600)
-    with os.fdopen(fd, "w") as fh:
-        json.dump(payload, fh, indent=2, default=str)
+    """Write ``payload`` as JSON (atomic, mode 0600)."""
+    write_text_atomic(path, json.dumps(payload, indent=2, default=str), dir_mode=0o777)
 
 
 def _meta(meta: dict) -> dict:
@@ -102,10 +94,6 @@ def export_balances(path: Path, meta: dict, balances: list[Balance]) -> None:
     write_json(path, {"meta": _meta(meta), "balances": [asdict(b) for b in balances]})
 
 
-def balance_label(code: str | None) -> str:
-    return BALANCE_LABELS.get(code or "", "")
-
-
 def render_banks(banks: list[Aspsp], width: int | None = None) -> str:
     if not banks:
         return "No banks match."
@@ -118,7 +106,7 @@ def render_banks(banks: list[Aspsp], width: int | None = None) -> str:
 def render_balances(balances: list[Balance], width: int | None = None) -> str:
     if not balances:
         return "The bank returned no balances."
-    rows = [[b.balance_type or "-", balance_label(b.balance_type) or "-", b.name or "-", _fmt_amount(b.amount),
+    rows = [[b.balance_type or "-", b.type_label or "-", b.name or "-", _fmt_amount(b.amount),
              b.currency or "-", b.reference_date.isoformat() if b.reference_date else "-",
              b.last_change.isoformat(timespec="minutes") if b.last_change else "-"] for b in balances]
     return "\n".join(_table(("Type", "Meaning", "Name", "Amount", "Cur", "Reference date", "Last change"), rows,
@@ -134,22 +122,6 @@ def render_accounts(rows: list[dict], width: int | None = None) -> str:
     return "\n".join(lines)
 
 
-def flatten(data, prefix: str = "") -> dict[str, str]:
-    """Nested dicts become ``a.b`` keys, lists are joined with ", "; empty values are dropped."""
-    out: dict[str, str] = {}
-    if isinstance(data, dict):
-        for k, v in data.items():
-            out.update(flatten(v, f"{prefix}.{k}" if prefix else str(k)))
-    elif isinstance(data, list):
-        parts = [", ".join(f"{k}={v}" for k, v in flatten(x).items()) if isinstance(x, (dict, list)) else str(x)
-                 for x in data if x not in (None, "", [], {})]
-        if parts:
-            out[prefix] = "; ".join(parts)
-    elif data not in (None, ""):
-        out[prefix] = str(data)
-    return out
-
-
 def render_details(details: dict[str, str], width: int | None = None) -> str:
     if not details:
         return "The bank returned no account details."
@@ -163,3 +135,10 @@ def render_sessions(rows: list[dict], width: int | None = None) -> str:
               r["valid_until"] or "-", r["local_status"], r["live_status"] or "(offline)"] for r in rows]
     return "\n".join(_table(("Bank", "Cty", "Session", "Accts", "Configured accounts", "Valid until", "Local",
                               "Live"), table, width=width, flex=4))
+
+
+def render_authorize(rows: list[dict], width: int | None = None) -> str:
+    if not rows:
+        return "No accounts."
+    table = [[r["account"], r["bank"], r["iban_masked"], r["status"], r["valid_until"] or "-"] for r in rows]
+    return "\n".join(_table(("Account", "Bank", "IBAN", "Status", "Valid until"), table, width=width, flex=1))

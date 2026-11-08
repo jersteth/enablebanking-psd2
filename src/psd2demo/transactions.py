@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation
+from typing import Iterable
 
 
 @dataclass(frozen=True)
@@ -83,16 +84,17 @@ def sort_txns(txns: list[Txn]) -> list[Txn]:
     return sorted(txns, key=lambda t: t.effective_date or date.min, reverse=True)
 
 
-def summarize(txns: list[Txn]) -> dict[str, Summary]:
+def summarize_amounts(pairs: Iterable[tuple[str | None, Decimal | None]]) -> dict[str, Summary]:
+    """Per-currency count, credits (>= 0) and debits (< 0) of (currency, amount) pairs; None amounts skipped."""
     acc: dict[str, list] = {}
-    for t in txns:
-        if t.amount is None:
+    for currency, amount in pairs:
+        if amount is None:
             continue
-        cur = t.currency or "?"
-        count, credits, debits = acc.get(cur, [0, Decimal(0), Decimal(0)])
-        if t.amount >= 0:
-            credits += t.amount
-        else:
-            debits += t.amount
-        acc[cur] = [count + 1, credits, debits]
+        count, credits, debits = acc.get(currency or "?", [0, Decimal(0), Decimal(0)])
+        acc[currency or "?"] = [count + 1, credits + amount, debits] if amount >= 0 else [count + 1, credits,
+                                                                                          debits + amount]
     return {cur: Summary(*vals) for cur, vals in sorted(acc.items())}
+
+
+def summarize(txns: list[Txn]) -> dict[str, Summary]:
+    return summarize_amounts((t.currency, t.amount) for t in txns)

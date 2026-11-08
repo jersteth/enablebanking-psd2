@@ -1,6 +1,6 @@
 from conftest import OTHER_IBAN, VALID_IBAN, FakeClient, cmd_args, make_ctx
 from psd2demo.commands import accounts
-from psd2demo.output import flatten
+from psd2demo.eb.models import flatten
 
 
 def _run(tmp_path, *argv):

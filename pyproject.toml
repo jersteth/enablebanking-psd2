@@ -10,7 +10,7 @@ requires-python = ">=3.11"
 dependencies = ["httpx>=0.27", "PyJWT[crypto]>=2.8"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "respx>=0.21"]
+dev = ["pytest>=8", "respx>=0.21", "jsonschema>=4.18"]
 
 [project.scripts]
 psd2-demo = "psd2demo.cli:main"

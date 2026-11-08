@@ -151,3 +151,11 @@ def test_sessions_parsing():
     assert args.json and args.verbose and args.all
     with pytest.raises(SystemExit):
         parse_args(["sessions", "revoke", "--all", "--bank", "KBC"])
+
+
+def test_authorize_parsing():
+    args = parse_args(["authorize", "--account", "a", "--account", "b", "--consent-days", "30"])
+    assert args.cmd == "authorize" and args.account == ["a", "b"] and args.consent_days == 30 and not args.status
+    assert parse_args(["authorize", "--status"]).status
+    with pytest.raises(SystemExit):
+        parse_args(["authorize", "--all", "--account", "a"])

@@ -31,8 +31,10 @@ class EnableBankingClient:
 
     def __init__(self, signer: JwtSigner, *, base_url: str = BASE_URL, timeout: float = 30.0,
                  psu_headers: dict[str, str] | None = None, transport: httpx.BaseTransport | None = None,
-                 sleep: Callable[[float], None] = time.sleep, event_hooks: dict | None = None):
+                 sleep: Callable[[float], None] = time.sleep, event_hooks: dict | None = None,
+                 retry_rate_limits: bool = True):
         self._signer = signer
+        self._retry_rate_limits = retry_rate_limits  # False for unattended runs: a daily cap won't clear in seconds
         self.psu_headers = psu_headers or {}  # sent on /auth, /sessions and AIS data calls
         self.request_count = 0  # HTTP attempts made, including retries
         self._sleep = sleep
@@ -72,7 +74,8 @@ class EnableBankingClient:
                     except ValueError:
                         raise errors.ApiSchemaError(resp.status_code, method, path,
                                                     message="unexpected response: not JSON")
-                retryable = resp.status_code == 429 or (method == "GET" and resp.status_code >= 500)
+                retryable = (resp.status_code == 429 and self._retry_rate_limits) or (
+                    method == "GET" and resp.status_code >= 500)
                 if not retryable or attempt == MAX_RETRIES:
                     raise errors.from_response(resp)
                 retry_after, reason = resp.headers.get("Retry-After"), f"HTTP {resp.status_code}"

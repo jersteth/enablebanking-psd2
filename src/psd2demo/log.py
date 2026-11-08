@@ -35,6 +35,11 @@ class RedactingFilter(logging.Filter):
 _FILTER = RedactingFilter()
 
 
+def redact(text: str) -> str:
+    """Apply the log redaction to any text (e.g. an unexpected error message put into output)."""
+    return _FILTER.redact(text)
+
+
 def set_own_ibans(ibans) -> None:
     """IBANs of the user's configured accounts stay readable in logs; all others are masked."""
     _FILTER.keep_ibans = frozenset(ibans)

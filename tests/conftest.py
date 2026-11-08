@@ -74,6 +74,11 @@ class FakeClient:
         self.state = None
         self.psu_headers = {"Psu-User-Agent": "test"}
         self.delete_errors = {}
+        self.session_fixtures: list[str] = []  # fixtures create_session returns in order (default session_create)
+
+    @property
+    def request_count(self) -> int:  # one fake "HTTP request" per recorded call
+        return len(self.calls)
 
     def get_aspsps(self, country, psu_type="personal"):
         self.calls.append(("aspsps", country))
@@ -88,7 +93,8 @@ class FakeClient:
 
     def create_session(self, code):
         self.calls.append(("create_session", code))
-        return Session.from_json(load_fixture("session_create.json"))
+        fixture = self.session_fixtures.pop(0) if self.session_fixtures else "session_create.json"
+        return Session.from_json(load_fixture(fixture))
 
     def get_session(self, session_id):
         self.calls.append(("get_session", session_id))
@@ -126,6 +132,24 @@ def make_cfg(tmp_path, bank="KBC", iban=VALID_IBAN, *, accounts=None, **kwargs) 
 
 def make_store(tmp_path) -> SessionStore:
     return SessionStore(tmp_path / ".psd2demo" / "session.json")
+
+
+THREE_ACCOUNTS = {"main": ("KBC", VALID_IBAN), "savings": ("KBC", OTHER_IBAN), "giro": ("Belfius", FOREIGN_IBAN)}
+BOTH_KBC = (StoredAccount("acc-uid-1", iban_hash(VALID_IBAN)), StoredAccount("acc-uid-2", iban_hash(OTHER_IBAN)))
+
+
+def write_config(tmp_path, key_file, accounts: dict, *, top: str = "", extra: str = "") -> Path:
+    """config.toml with the test app and ``accounts`` {name: (bank, iban)}; ``top``/``extra`` go before/after."""
+    tables = "".join(f'\n[accounts.{name}]\nbank_name = "{bank}"\niban = "{iban}"\n'
+                     for name, (bank, iban) in accounts.items())
+    path = tmp_path / "config.toml"
+    path.write_text(f'''{top}
+[enablebanking]
+app_id = "{APP_ID}"
+key_path = "{key_file}"
+redirect_url = "https://localhost/callback"
+{tables}{extra}''')
+    return path
 
 
 def session_record(**overrides) -> SessionRecord:

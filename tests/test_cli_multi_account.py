@@ -5,34 +5,15 @@ import json
 import httpx
 import respx
 
-from conftest import APP_ID, BASE, FOREIGN_IBAN, OTHER_IBAN, VALID_IBAN, PasteStdin, load_fixture
+from conftest import BASE, FOREIGN_IBAN, OTHER_IBAN, VALID_IBAN, PasteStdin, load_fixture, write_config
 from psd2demo import cli
 
 MAIN, SAVINGS, GIRO = VALID_IBAN, OTHER_IBAN, FOREIGN_IBAN
 
 
 def _config(tmp_path, key_file):
-    path = tmp_path / "config.toml"
-    path.write_text(f'''default_account = "main"
-
-[enablebanking]
-app_id = "{APP_ID}"
-key_path = "{key_file}"
-redirect_url = "https://localhost/callback"
-
-[accounts.main]
-bank_name = "KBC"
-iban = "{MAIN}"
-
-[accounts.savings]
-bank_name = "KBC"
-iban = "{SAVINGS}"
-
-[accounts.giro]
-bank_name = "Belfius"
-iban = "{GIRO}"
-''')
-    return path
+    return write_config(tmp_path, key_file, {"main": ("KBC", MAIN), "savings": ("KBC", SAVINGS),
+                                             "giro": ("Belfius", GIRO)}, top='default_account = "main"')
 
 
 @respx.mock

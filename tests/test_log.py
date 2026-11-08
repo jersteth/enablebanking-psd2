@@ -1,4 +1,6 @@
 import logging
+import subprocess
+import sys
 from datetime import timedelta
 
 import httpx
@@ -55,3 +57,10 @@ def test_verbose_http_hook_logs_redacted_response(capsys):
     assert err.rstrip().endswith("…") and len(err) < 2300
     setup_logging(False)
     set_own_ibans([])
+
+
+def test_package_logger_is_silent_without_cli_setup():
+    code = ("import logging, psd2demo; logging.getLogger('psd2demo.x').warning('should not print'); "
+            "print(any(isinstance(h, logging.NullHandler) for h in logging.getLogger('psd2demo').handlers))")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert out.stdout.strip() == "True" and out.stderr == ""

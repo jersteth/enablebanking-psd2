@@ -33,6 +33,7 @@ ACCOUNT_KEYS = ("bank_name", "bank_country", "iban")
 ACCOUNT_ENV = {"bank_name": "EB_BANK_NAME", "bank_country": "EB_BANK_COUNTRY", "iban": "EB_IBAN"}
 HISTORY_PARTS = frozenset({"balances", "details", "raw"})
 LEGACY_ACCOUNT, ENV_ACCOUNT, CLI_ACCOUNT = "demo", "env", "cli"
+NO_ACCOUNTS = "no accounts configured; add [accounts.<name>] tables to config.toml"
 
 
 @dataclass(frozen=True)
@@ -170,6 +171,13 @@ def _load_accounts(data: dict, env: Mapping[str, str], overrides: Mapping[str, o
     return accounts, forced
 
 
+def parse_include(value) -> tuple[frozenset[str], frozenset[str]]:
+    """A list or comma-separated string of parts ("none" = no parts) → (known parts, unknown parts)."""
+    parts = [p.strip() for p in value.split(",")] if isinstance(value, str) else list(value)
+    parts = frozenset(p for p in parts if p and p != "none")
+    return parts & HISTORY_PARTS, parts - HISTORY_PARTS
+
+
 def _history(data: dict, env: Mapping[str, str], problems: list[str]) -> HistorySettings:
     raw = dict(data.get("history", {}))
     for key, var in (("days", "EB_HISTORY_DAYS"), ("include", "EB_HISTORY_INCLUDE"), ("max_age", "EB_HISTORY_MAX_AGE")):
@@ -184,13 +192,9 @@ def _history(data: dict, env: Mapping[str, str], problems: list[str]) -> History
     except (TypeError, ValueError):
         problems.append("[history] days must be >= 1 and max_age >= 0 (integers)")
         return defaults
-    include = raw.get("include", [])
-    parts = [p.strip() for p in include.split(",")] if isinstance(include, str) else list(include)
-    parts = frozenset(p for p in parts if p and p != "none")
-    if parts - HISTORY_PARTS:
-        problems.append(f"[history] include: unknown part(s) {sorted(parts - HISTORY_PARTS)}; "
-                        f"allowed: {sorted(HISTORY_PARTS)}")
-        parts &= HISTORY_PARTS
+    parts, unknown = parse_include(raw.get("include", []))
+    if unknown:
+        problems.append(f"[history] include: unknown part(s) {sorted(unknown)}; allowed: {sorted(HISTORY_PARTS)}")
     return HistorySettings(days, parts, max_age)
 
 
