@@ -1,0 +1,10 @@
+{
+  "session_id": "99999999-8888-7777-6666-555555555555",
+  "accounts": [
+    {"uid": "acc-uid-1", "account_id": {"iban": "BE68539007547034"}, "name": "Zichtrekening", "currency": "EUR"},
+    {"uid": "acc-uid-2", "account_id": {"iban": "BE71096123456769"}, "name": "Spaarrekening", "currency": "EUR"}
+  ],
+  "aspsp": {"name": "KBC", "country": "BE"},
+  "psu_type": "personal",
+  "access": {"valid_until": "2026-11-09T10:00:00.000000+00:00"}
+}

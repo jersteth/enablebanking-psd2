@@ -1,0 +1,34 @@
+{
+  "transactions": [
+    {
+      "entry_reference": "REF-001",
+      "transaction_amount": {"currency": "EUR", "amount": "42.50"},
+      "credit_debit_indicator": "DBIT",
+      "status": "BOOK",
+      "booking_date": "2026-11-05",
+      "value_date": "2026-11-05",
+      "creditor": {"name": "Delhaize"},
+      "creditor_account": {"iban": "BE71096123456769"},
+      "remittance_information": ["Groceries", "Card 1234"]
+    },
+    {
+      "transaction_id": "TX-002",
+      "transaction_amount": {"currency": "EUR", "amount": "2500.00"},
+      "credit_debit_indicator": "CRDT",
+      "status": "BOOK",
+      "booking_date": "2026-11-01",
+      "value_date": "2026-11-01",
+      "debtor": {"name": "Employer NV"},
+      "debtor_account": {"iban": "BE62510007547061"},
+      "remittance_information": ["Salary October"]
+    },
+    {
+      "transaction_amount": {"currency": "EUR", "amount": "9.99"},
+      "credit_debit_indicator": "DBIT",
+      "status": "PDNG",
+      "value_date": "2026-11-07",
+      "creditor": {"name": "Streaming Co"}
+    }
+  ],
+  "continuation_key": "page2"
+}

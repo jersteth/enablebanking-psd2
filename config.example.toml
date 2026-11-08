@@ -1,0 +1,42 @@
+# Copy to config.toml (git-ignored) and fill in.
+# Precedence: CLI flag > environment variable > this file > default.
+
+[enablebanking]
+# Application ID from the Enable Banking control panel (= file name of the downloaded .pem).
+# env EB_APP_ID, flag --app-id
+app_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+# Path to the private key downloaded at registration. Keep it outside the repo, chmod 600.
+# env EB_KEY_PATH, flag --key
+key_path = "~/.config/psd2demo/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.pem"
+
+# Redirect URL; must be whitelisted on the application exactly as written here.
+# https://... -> paste mode; http://localhost:<port>/... -> automatic capture (if Enable Banking accepts it).
+# env EB_REDIRECT_URL, flag --redirect-url
+redirect_url = "https://localhost/callback"
+
+# Your public IP (curl -s https://ifconfig.me), sent as Psu-Ip-Address. Many banks require it:
+# Enable Banking accepts all of a bank's required PSU headers or none. Without it the demo sends none
+# (unattended access, which banks may cap at 4 requests per day). env EB_PSU_IP, flag --psu-ip
+# psu_ip_address = "203.0.113.10"
+
+[demo]
+# Exact bank (ASPSP) name as listed by Enable Banking; `psd2-demo check` suggests candidates.
+# env EB_BANK_NAME, flag --bank
+bank_name = "KBC"
+
+# env EB_BANK_COUNTRY, flag --country (default BE)
+bank_country = "BE"
+
+# Account to read. Must be linked to the application. env EB_IBAN, flag --iban
+iban = "BE68 5390 0754 7034"
+
+# auto | paste | listener. env EB_CAPTURE_MODE, flag --capture (default auto)
+capture_mode = "auto"
+
+# Requested consent validity in days, capped by the bank's maximum.
+# env EB_CONSENT_DAYS, flag --consent-days (default 1)
+consent_days = 1
+
+# Seconds to wait for the bank redirect. env EB_CALLBACK_TIMEOUT, flag --callback-timeout (default 300)
+callback_timeout = 300

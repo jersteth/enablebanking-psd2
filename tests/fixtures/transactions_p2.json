@@ -1,0 +1,14 @@
+{
+  "transactions": [
+    {
+      "entry_reference": "REF-004",
+      "transaction_amount": {"currency": "USD", "amount": "15.00"},
+      "credit_debit_indicator": "DBIT",
+      "status": "BOOK",
+      "booking_date": "2026-10-20",
+      "creditor": {"name": "US Shop"},
+      "remittance_information": []
+    }
+  ],
+  "continuation_key": null
+}
