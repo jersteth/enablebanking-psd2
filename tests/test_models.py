@@ -45,3 +45,8 @@ def test_aspsp_required_psu_headers():
     banks = [Aspsp.from_json(a) for a in load_fixture("aspsps.json")["aspsps"]]
     assert banks[0].required_psu_headers == []
     assert banks[2].required_psu_headers == ["Psu-Ip-Address", "Psu-User-Agent"]
+
+
+def test_naive_timestamps_are_utc():
+    st = SessionStatus.from_json({"status": "AUTHORIZED", "access": {"valid_until": "2026-11-09T10:00:00"}})
+    assert st.valid_until.utcoffset().total_seconds() == 0

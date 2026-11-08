@@ -12,7 +12,7 @@ Covers the core capabilities in `specs/product.md` (consent/authorization, AIS t
 
 ## Enable Banking Setup Facts (from docs; drive R8)
 - Control panel: `https://enablebanking.com/cp/applications`. Sign up and log in, then use "Add a new application".
-- Form: **Environment** = Production; **Private key** = default (generated in the browser); **Application name** (shown to the user at bank authorization); **Redirect URLs** (whitelist). Optional privacy-policy/terms URLs must be full `https://` URLs, otherwise the form returns "Invalid URL".
+- Form: **Environment** = Production; **Private key** = default (generated in the browser); **Application name** (shown to the user at bank authorization); **Redirect URLs** (whitelist). Optional privacy-policy/terms URLs must be full `https://` URLs, otherwise the form returns "Invalid URL" (reported by a third-party guide, unverified).
 - After "Register", the browser downloads `<application-id>.pem`. The file name is the application ID (the JWT `kid`). The key cannot be downloaded again, so losing it means registering a new application.
 - A new production app starts as **Inactive**. "Activate by linking accounts" runs a bank authorization in the control panel. Once the link is confirmed, the app is active in **restricted mode**.
 - Linking does not replace API authorization: the demo must still run its own `POST /auth` consent.

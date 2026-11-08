@@ -44,20 +44,22 @@ def _date(value) -> date | None:
         return None
 
 
-def _amount(raw: dict, debit: bool) -> tuple[Decimal | None, str | None]:
+def _amount(raw: dict) -> tuple[Decimal | None, str | None]:
+    """Signed amount: ``credit_debit_indicator`` decides the sign; without it the bank's own sign is kept."""
     ta = raw.get("transaction_amount") or {}
     try:
-        amount = abs(Decimal(str(ta["amount"]))) if ta.get("amount") is not None else None
+        amount = Decimal(str(ta["amount"])) if ta.get("amount") is not None else None
     except InvalidOperation:
         amount = None
-    if amount is not None and debit:
-        amount = -amount
+    indicator = str(raw.get("credit_debit_indicator") or "").upper()
+    if amount is not None and indicator in ("CRDT", "DBIT"):
+        amount = -abs(amount) if indicator == "DBIT" else abs(amount)
     return amount, ta.get("currency")
 
 
 def normalize(raw: dict, date_from: date, date_to: date) -> Txn:
-    debit = raw.get("credit_debit_indicator") == "DBIT"
-    amount, currency = _amount(raw, debit)
+    amount, currency = _amount(raw)
+    debit = (amount is not None and amount < 0) or str(raw.get("credit_debit_indicator") or "").upper() == "DBIT"
     party = raw.get("creditor" if debit else "debtor") or {}
     party_account = raw.get("creditor_account" if debit else "debtor_account") or {}
     booking, value, txn_date = (_date(raw.get(k)) for k in ("booking_date", "value_date", "transaction_date"))

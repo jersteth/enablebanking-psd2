@@ -31,3 +31,10 @@ def test_matches():
     assert rec.matches(APP_ID, "kbc", "BE", VALID_IBAN)
     assert not rec.matches(APP_ID, "KBC", "BE", "BE71096123456769")
     assert not rec.matches("other", "KBC", "BE", VALID_IBAN)
+
+
+def test_non_object_json_is_ignored(tmp_path):
+    store = SessionStore(tmp_path / "session.json")
+    for content in ("[]", "null", '"x"'):
+        store.path.write_text(content)
+        assert store.load() is None

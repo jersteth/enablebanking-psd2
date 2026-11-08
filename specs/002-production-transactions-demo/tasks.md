@@ -48,7 +48,7 @@ Refs: `requirements.md` (R1–R8), `design.md`. Mark tasks `[x]` when done and t
 - [x] 4.6 Final check: full `pytest` green; `grep` finds no secrets or real IBANs in the repo; the `.gitignore` coverage is confirmed.
 
 ## Verification Status
-- Automated: 100 offline tests pass (`pytest`), including CLI end-to-end `run` with a mocked API (paste path, `--json`, `--export`).
+- Automated: 107 offline tests pass (`pytest`), including CLI end-to-end `run` with a mocked API (paste path, `--json`, `--export`).
 - Live API: `psd2-demo check` against `api.enablebanking.com` with an unregistered key returns the mapped 403 "Application does not exist". This confirms the transport, JWT and error paths.
 - Production: verified by the owner on 2026-11-08. `run` against a real Belgian bank returned the last 10 days of transactions (after fix 7).
 
@@ -60,3 +60,16 @@ Refs: `requirements.md` (R1–R8), `design.md`. Mark tasks `[x]` when done and t
 5. `Txn` also carries `transaction_date` plus an `effective_date` property, and `Summary.net` is a computed property.
 6. Network failures raise `ApiNetworkError` (its own hint, no `status=0` in the output). Models raise `ValueError` on a bad shape, and the client wraps it into `ApiSchemaError` with the real method and path. `ApiError.hint` is a property: an `ERROR_HINTS[error]` hint takes precedence over the class default.
 7. **Fix after the first production run:** the bank returned 422 `PSU_HEADER_NOT_PROVIDED` because the demo sent `Psu-User-Agent` without `Psu-Ip-Address`. Enable Banking requires all of an ASPSP's `required_psu_headers` (from `GET /aspsps`) or none. `flow.select_psu_headers` now sends the full set when every required header is configured and none otherwise, and prints a note. The design's "send PSU headers when the user is present" rule is replaced by this all-or-none rule.
+
+## Verify Fixes (from `/sdd:verify`, branch `fix/002-verify-findings`)
+- [x] V1 Timestamps without an offset are parsed as UTC (`eb/models._dt`), so the reuse check can't raise `TypeError`. Test: `test_models.py::test_naive_timestamps_are_utc`.
+- [x] V2 `--json`: the bank URL and the "waiting" line use `StepReporter.notice` (shown even when quiet). The paste prompt goes to stderr (`consent.prompt_stderr`), so stdout stays pure JSON. Tests: `test_flow_run.py::test_consent_url_shown_in_quiet_mode`, `test_consent_capture.py::test_prompt_goes_to_stderr`, and `test_cli.py::test_run_json_and_export` (now drives the real prompt through stdin).
+- [x] V3 A repeated `continuation_key` stops paging with a warning and `truncated=True`. Test: `test_client.py::test_pagination_repeated_key_stops`.
+- [x] V4 A session-save `OSError` after `create_session` prints a warning and the run continues, since the consent is still usable for this run. Test: `test_flow_run.py::test_save_failure_warns_and_continues`.
+- [x] V5 Amount sign: `credit_debit_indicator` (case-insensitive) decides it when present, otherwise the bank's own sign is kept. The counterparty side follows the sign. Test: `test_transactions.py::test_sign_without_indicator_keeps_bank_sign`.
+- [x] V6 (R6 AC3) A "Counterparty IBAN" column is added to the table. Test: the golden table in `test_output.py`.
+- [x] V7 Session file holding valid JSON that isn't an object → ignored with a warning. Test: `test_session_store.py::test_non_object_json_is_ignored`.
+- [x] V11 The verbose log body is cut without splitting a word, so a partial IBAN can't escape redaction (`log.truncate_body`). Test: `test_log.py::test_truncate_never_splits_an_iban`.
+- [x] V15 Setup guide: sample output matches (2 transactions, IBAN column); "Invalid URL" and two troubleshooting wordings marked unverified; `callback_timeout` added to the config table.
+- Deferred to 003: export paths outside `exports/` (V12), Ctrl+C outside `_execute` (V13), API `code` field (V14), undocumented minor interface deviations (V16), missing tests for the verbose hook, a 401 on `get_session`, and no PSU headers on `GET /sessions` (V17).
+- Ignored: listener port-in-use and IPv6 (V8, V18; paste mode is the default), Retry-After edge cases (V9), string `remittance_information` (V10).

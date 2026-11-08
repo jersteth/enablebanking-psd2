@@ -133,7 +133,7 @@ def test_pagination_repeated_key_stops(client):
     route = respx.get(f"{BASE}/accounts/u1/transactions").respond(
         json={"transactions": [{}], "continuation_key": "same"})
     pages = list(client.iter_transactions("u1", date(2026, 1, 1), date(2026, 1, 2)))
-    assert len(pages) == 2 and route.call_count == 2 and not pages[-1].truncated
+    assert len(pages) == 2 and route.call_count == 2 and pages[-1].truncated
 
 
 @respx.mock

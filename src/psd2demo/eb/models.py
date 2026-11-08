@@ -4,13 +4,15 @@
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 def _dt(value) -> datetime | None:
+    """Parse an ISO 8601 timestamp; one without an offset is taken as UTC so comparisons never fail."""
     if not value:
         return None
-    return datetime.fromisoformat(str(value))
+    parsed = datetime.fromisoformat(str(value))
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 def _require(data: dict, key: str):

@@ -49,3 +49,15 @@ def test_tolerates_missing_fields():
     t = normalize({}, FROM, TO)
     assert t.amount is None and t.currency is None and not t.out_of_range
     assert summarize([t]) == {}
+
+
+def test_sign_without_indicator_keeps_bank_sign():
+    t = normalize({"transaction_amount": {"currency": "EUR", "amount": "-25.00"},
+                   "creditor": {"name": "Shop"}, "debtor": {"name": "Me"}}, FROM, TO)
+    assert t.amount == Decimal("-25.00") and t.counterparty_name == "Shop"
+    t = normalize({"transaction_amount": {"currency": "EUR", "amount": "25.00"}, "credit_debit_indicator": "dbit",
+                   "creditor": {"name": "Shop"}}, FROM, TO)
+    assert t.amount == Decimal("-25.00") and t.counterparty_name == "Shop"
+    t = normalize({"transaction_amount": {"currency": "EUR", "amount": "-5"}, "credit_debit_indicator": "CRDT",
+                   "debtor": {"name": "Refund Co"}}, FROM, TO)
+    assert t.amount == Decimal("5") and t.counterparty_name == "Refund Co"

@@ -102,3 +102,25 @@ def test_truncated_warning(tmp_path):
     page = TransactionsPage([], "k", {}, truncated=True)
     res, out, _, _ = _run(tmp_path, FakeClient(pages=[page]))
     assert res.ok and "truncated" in out
+
+
+def test_save_failure_warns_and_continues(tmp_path, monkeypatch):
+    def broken_save(self, record):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr("psd2demo.session_store.SessionStore.save", broken_save)
+    res, out, _, _ = _run(tmp_path, FakeClient())
+    assert res.ok and len(res.txns) == 4
+    assert "session not saved (Permission denied)" in out
+
+
+def test_consent_url_shown_in_quiet_mode(tmp_path):
+    out = io.StringIO()
+    client = FakeClient()
+    hooks = ConsentHooks(capture=lambda cfg: f"https://localhost/callback?code=C&state={client.state}",
+                         open_browser=lambda url: None)
+    res = run_demo(make_cfg(tmp_path), client, StepReporter(out, quiet=True), store=make_store(tmp_path),
+                   hooks=hooks, today=TODAY, now=NOW)
+    assert res.ok
+    text = out.getvalue()
+    assert load_fixture("auth.json")["url"] in text and "[✓]" not in text

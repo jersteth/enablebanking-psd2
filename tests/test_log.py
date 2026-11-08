@@ -1,6 +1,6 @@
 import logging
 
-from psd2demo.log import RedactingFilter, setup_logging
+from psd2demo.log import RedactingFilter, setup_logging, truncate_body
 
 TARGET = "BE68539007547034"
 
@@ -28,3 +28,10 @@ def test_filter_applied(capsys):
     assert "abc.def" not in err and "zzz" not in err
     setup_logging(False)
     assert logger.level == logging.WARNING
+
+
+def test_truncate_never_splits_an_iban():
+    body = "x" * 2040 + " BE71096123456769 tail"
+    out = truncate_body(body)
+    assert out.endswith(" …") and "BE7109" not in out
+    assert truncate_body("short") == "short"

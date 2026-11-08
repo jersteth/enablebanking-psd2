@@ -56,6 +56,10 @@ class StepReporter:
     def info(self, text: str) -> None:
         self._print(f"      {text}")
 
+    def notice(self, text: str) -> None:
+        """Like info, but also shown in quiet (--json) mode: for lines the user must act on."""
+        print(f"      {text}", file=self.out or sys.stderr, flush=True)
+
     def ok(self, step: Step, detail: str = "") -> None:
         self.steps.append(StepRecord(step.value, True, detail))
         self._print(f"[✓] {step.value:<12} {detail}".rstrip())
@@ -190,11 +194,11 @@ def run_demo(cfg: Config, client: EnableBankingClient, reporter: StepReporter, *
             state = consent.new_state()
             valid_until = consent.compute_valid_until(now, cfg.consent_days, bank.maximum_consent_validity)
             auth = client.start_auth(bank, valid_until=valid_until, state=state, redirect_url=cfg.redirect_url)
-            reporter.info("approve access at your bank in the browser; if it does not open, visit:")
-            reporter.info(auth.url)
+            reporter.notice("approve access at your bank in the browser; if it does not open, visit:")
+            reporter.notice(auth.url)
             hooks.open_browser(auth.url)
             if cfg.capture_mode == "listener":
-                reporter.info(f"waiting for the bank redirect on {cfg.redirect_url} ...")
+                reporter.notice(f"waiting for the bank redirect on {cfg.redirect_url} ...")
             session = client.create_session(consent.parse_callback(hooks.capture(cfg), state))
             session_valid_until = session.valid_until.isoformat() if session.valid_until else ""
             reporter.ok(Step.CONSENT, f"new session valid until {session_valid_until or 'unknown'}")
@@ -205,7 +209,11 @@ def run_demo(cfg: Config, client: EnableBankingClient, reporter: StepReporter, *
                                    bank_country=bank.country, iban_sha256=iban_hash(cfg.iban),
                                    account_uid=account.uid, valid_until=session_valid_until,
                                    created_at=now.isoformat())
-            store.save(stored)
+            try:
+                store.save(stored)
+            except OSError as exc:
+                reporter.notice(f"warning: session not saved ({exc.strerror or exc}); "
+                                f"the next run will need a new consent. Check {store.path.parent}")
             reporter.ok(Step.ACCOUNT, f"{masked} {account.name or '-'} {account.currency or ''}".rstrip()
                         + f" (uid {account.uid})")
 

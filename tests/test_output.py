@@ -16,19 +16,19 @@ def _txns():
 
 def test_table_golden():
     expected = (
-        "Booked       Value          Amount  Cur  Counterparty  Remittance             Status  Ref\n"
-        "-----------  ----------  ---------  ---  ------------  ---------------------  ------  -------\n"
-        "-            2026-11-07      -9.99  EUR  Streaming Co  -                      PDNG    -\n"
-        "2026-11-05   2026-11-05     -42.50  EUR  Delhaize      Groceries / Card 1234  BOOK    REF-001\n"
-        "2026-11-01   2026-11-01  +2,500.00  EUR  Employer NV   Salary October         BOOK    TX-002\n"
-        "2026-10-20*  -              -15.00  USD  US Shop       -                      BOOK    REF-004\n"
+        "Booked       Value          Amount  Cur  Counterparty  Counterparty IBAN  Remittance             Status  Ref\n"
+        "-----------  ----------  ---------  ---  ------------  -----------------  ---------------------  ------  -------\n"
+        "-            2026-11-07      -9.99  EUR  Streaming Co  -                  -                      PDNG    -\n"
+        "2026-11-05   2026-11-05     -42.50  EUR  Delhaize      BE71096123456769   Groceries / Card 1234  BOOK    REF-001\n"
+        "2026-11-01   2026-11-01  +2,500.00  EUR  Employer NV   BE62510007547061   Salary October         BOOK    TX-002\n"
+        "2026-10-20*  -              -15.00  USD  US Shop       -                  -                      BOOK    REF-004\n"
         "* returned by the bank outside the requested date range"
     )
     assert render_transactions(_txns(), width=200) == expected
 
 
 def test_remittance_truncated_to_width():
-    out = render_transactions(_txns(), width=80)
+    out = render_transactions(_txns(), width=100)
     assert "Groceries / Card 1234" not in out and "…" in out
 
 

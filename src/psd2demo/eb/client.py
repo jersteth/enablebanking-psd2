@@ -122,11 +122,12 @@ class EnableBankingClient:
         for n in range(1, max_pages + 1):
             page = self.get_transactions_page(account_uid, date_from, date_to, key)
             key = page.continuation_key
-            if not key or key in seen:
+            if not key:
                 yield page
                 return
-            if n == max_pages:
-                log.warning("stopped after %d transaction pages; more data may be available", max_pages)
+            if key in seen or n == max_pages:
+                reason = "repeated continuation_key" if key in seen else f"page limit {max_pages}"
+                log.warning("stopped transaction paging (%s); more data may be available", reason)
                 yield replace(page, truncated=True)
                 return
             seen.add(key)

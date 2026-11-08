@@ -17,7 +17,7 @@ Click **Add a new application** and fill in the form:
 | **Private key** | Keep the default: the key is generated in your browser. |
 | **Application name** | Any name, e.g. `psd2-demo personal`. Your bank shows it on its consent screen. |
 | **Redirect URLs** | See [Choosing a redirect URL](#choosing-a-redirect-url). Recommended: `https://localhost/callback`. |
-| Privacy policy / Terms URLs (if asked) | Must be full URLs starting with `https://`. Without the prefix the form returns **"Invalid URL"** (unverified). |
+| Privacy policy / Terms URLs (if asked) | Must be full URLs starting with `https://`. Without the prefix the form returns **"Invalid URL"** (reported by third-party guides, unverified). |
 | Description / e-mail (if asked) | Free text / your e-mail. |
 
 Click **Register**. The browser downloads a file named `<application-id>.pem`, e.g. `aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.pem`.
@@ -67,6 +67,7 @@ Edit `config.toml`:
 | `iban` | the account linked in step 4; spaces are allowed | `EB_IBAN` |
 | `capture_mode` | `auto` (default): `listener` for `http://localhost:<port>`, otherwise `paste` | `EB_CAPTURE_MODE` |
 | `consent_days` | requested consent length (default 1, capped at the bank's maximum) | `EB_CONSENT_DAYS` |
+| `callback_timeout` | seconds to wait for the bank redirect (default 300) | `EB_CALLBACK_TIMEOUT` |
 | `psu_ip_address` | your public IP (`curl -s https://ifconfig.me`), sent as `Psu-Ip-Address`. Recommended: see below | `EB_PSU_IP` |
 
 **PSU headers.** Banks publish the "PSU headers" they need (`required_psu_headers`, printed by `check`). These tell the bank that you are present. Enable Banking only accepts **all of them or none**: a partial set fails with `PSU_HEADER_NOT_PROVIDED`. The demo sends `Psu-User-Agent` itself, and `Psu-Ip-Address` only if `psu_ip_address` is set.
@@ -108,12 +109,12 @@ Expected output:
 Paste the full redirect URL from the browser address bar: https://localhost/callback?code=...&state=...
 [✓] CONSENT      new session valid until 2026-11-09T11:59:00+00:00
 [✓] ACCOUNT      BE68 **** **** 7034 Zichtrekening EUR (uid 3f1c...)
-[✓] TRANSACTIONS 4 transactions 2026-10-29..2026-11-08, 1 page(s)
+[✓] TRANSACTIONS 2 transactions 2026-10-29..2026-11-08, 1 page(s)
 
-Booked      Value          Amount  Cur  Counterparty  Remittance             Status  Ref
-----------  ----------  ---------  ---  ------------  ---------------------  ------  -------
-2026-11-05  2026-11-05     -42.50  EUR  Delhaize      Groceries / Card 1234  BOOK    REF-001
-2026-11-01  2026-11-01  +2,500.00  EUR  Employer NV   Salary October         BOOK    TX-002
+Booked      Value          Amount  Cur  Counterparty  Counterparty IBAN  Remittance             Status  Ref
+----------  ----------  ---------  ---  ------------  -----------------  ---------------------  ------  -------
+2026-11-05  2026-11-05     -42.50  EUR  Delhaize      BE71096123456769   Groceries / Card 1234  BOOK    REF-001
+2026-11-01  2026-11-01  +2,500.00  EUR  Employer NV   BE62510007547061   Salary October         BOOK    TX-002
 
 Summary:
   EUR: 2 transactions, credits +2,500.00, debits -42.50, net +2,457.50
@@ -124,7 +125,7 @@ Exit code `0` means every step passed. Zero transactions is also a pass ("no tra
 - While the consent is valid (`consent_days`, default 1 day), `psd2-demo run` reuses the stored session (`[✓] CONSENT reused session ...`) and doesn't open the browser.
 - `psd2-demo run --fresh` forces a new consent.
 - `psd2-demo run --export exports/run.json` also writes the normalized transactions and the raw API pages (file mode 0600; `exports/` is git-ignored).
-- `psd2-demo run --json` prints a machine-readable result to stdout instead of the tables.
+- `psd2-demo run --json` prints a machine-readable result to stdout instead of the tables. If a new consent is needed, the bank URL and paste prompt still appear on stderr, so stdout stays valid JSON.
 - `--verbose` logs each HTTP call (tokens, codes and other IBANs redacted).
 
 Local state: `.psd2demo/session.json` (mode 0600) stores the session ID, account UID, validity, and a SHA-256 of the IBAN. Delete it to forget the session.
@@ -135,8 +136,8 @@ Local state: `.psd2demo/session.json` (mode 0600) stores the session ID, account
 |---|---|---|
 | `[✗] BANK Application does not exist` (403) | `app_id` doesn't match a registered application | Use the `.pem` file name exactly as `app_id`; check that you registered under the same Control Panel account |
 | `[✗] BANK` 401 `Invalid JWT` / signature error | Key doesn't belong to `app_id`, or the system clock is off | Pair the right `.pem` with its app ID; sync the clock (`timedatectl status`) |
-| 403 mentioning an inactive/restricted application | App still **Inactive** | Step 4: **Activate by linking accounts** |
-| Bank shows an error about the redirect URL, or `/auth` fails with a redirect URL error | `redirect_url` isn't whitelisted exactly | Add it to the application's Redirect URLs, or make the config match character for character |
+| 403 mentioning an inactive/restricted application (exact wording unverified) | App still **Inactive** | Step 4: **Activate by linking accounts** |
+| Bank shows an error about the redirect URL, or `/auth` fails with a redirect URL error (exact wording unverified) | `redirect_url` isn't whitelisted exactly | Add it to the application's Redirect URLs, or make the config match character for character |
 | `[✗] BANK bank 'X' not found` | Name differs from Enable Banking's ASPSP name | Copy a name from the printed candidates |
 | `[✗] CONSENT authorization failed at the bank: access_denied` | Consent cancelled or refused at the bank | Rerun and approve; use the same bank login as when linking |
 | `[✗] CONSENT callback state does not match` | Pasted a redirect URL from an older attempt | Paste the URL from the current run |
@@ -146,7 +147,7 @@ Local state: `.psd2demo/session.json` (mode 0600) stores the session ID, account
 | `422 PSU_HEADER_NOT_PROVIDED ... psu-ip-address is not provided` | The bank requires a full set of PSU headers and got a partial one (fixed since the demo sends all or none) | Set `psu_ip_address` to your public IP so the full set is sent |
 | `429 Too many requests` | Rate limit; under PSD2 a bank may cap access without the user present at 4 per day per account | Wait and retry later; avoid running in loops |
 | `ASPSP_ERROR` | Bank-side problem | Retry later |
-| Registration form says **"Invalid URL"** | Privacy/terms URL without `https://` (unverified) | Enter full `https://...` URLs |
+| Registration form says **"Invalid URL"** | Privacy/terms URL without `https://` (reported by third-party guides, unverified) | Enter full `https://...` URLs |
 | `[✗] CONFIG private key ... cannot be loaded` | Wrong file, or file corrupted or edited | Point `key_path` to the original downloaded `.pem` |
 | Warning `private key ... is readable by others` | Loose file permissions | `chmod 600 <key>` |
 

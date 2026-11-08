@@ -45,6 +45,13 @@ def setup_logging(verbose: bool, target_iban: str | None = None) -> logging.Logg
     return logger
 
 
+def truncate_body(text: str, limit: int = 2048) -> str:
+    """Cut at ``limit`` but drop a trailing partial word, so a split IBAN can't escape redaction."""
+    if len(text) <= limit:
+        return text
+    return re.sub(r"[A-Za-z0-9]+$", "", text[:limit]) + "…"
+
+
 def http_event_hooks() -> dict:
     """httpx hooks logging each response at DEBUG (body truncated to 2 KB)."""
     logger = logging.getLogger(LOGGER)
@@ -54,6 +61,6 @@ def http_event_hooks() -> dict:
             return
         resp.read()
         logger.debug("%s %s -> %d (%.0f ms) %s", resp.request.method, resp.request.url, resp.status_code,
-                     resp.elapsed.total_seconds() * 1000, resp.text[:2048])
+                     resp.elapsed.total_seconds() * 1000, truncate_body(resp.text))
 
     return {"response": [on_response]}

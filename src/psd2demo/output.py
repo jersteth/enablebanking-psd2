@@ -10,7 +10,8 @@ from pathlib import Path
 
 from psd2demo.transactions import Summary, Txn
 
-COLUMNS = ("Booked", "Value", "Amount", "Cur", "Counterparty", "Remittance", "Status", "Ref")
+COLUMNS = ("Booked", "Value", "Amount", "Cur", "Counterparty", "Counterparty IBAN", "Remittance", "Status", "Ref")
+REMITTANCE = COLUMNS.index("Remittance")
 MIN_REMITTANCE = 10
 
 
@@ -34,19 +35,20 @@ def render_transactions(txns: list[Txn], width: int | None = None) -> str:
             _fmt_amount(t.amount),
             t.currency or "-",
             _clip(t.counterparty_name or "-", 28),
+            t.counterparty_iban or "-",
             t.remittance or "-",
             t.status or "-",
             _clip(t.reference or "-", 16),
         ])
     widths = [max(len(COLUMNS[i]), *(len(r[i]) for r in rows)) for i in range(len(COLUMNS))]
-    fixed = sum(w for i, w in enumerate(widths) if i != 5) + 2 * (len(COLUMNS) - 1)
-    widths[5] = max(MIN_REMITTANCE, min(widths[5], width - fixed))
+    fixed = sum(w for i, w in enumerate(widths) if i != REMITTANCE) + 2 * (len(COLUMNS) - 1)
+    widths[REMITTANCE] = max(MIN_REMITTANCE, min(widths[REMITTANCE], width - fixed))
     right = {2}
 
     def line(cells):
         out = []
         for i, c in enumerate(cells):
-            c = _clip(c, widths[i]) if i == 5 else c
+            c = _clip(c, widths[i]) if i == REMITTANCE else c
             out.append(c.rjust(widths[i]) if i in right else c.ljust(widths[i]))
         return "  ".join(out).rstrip()
 

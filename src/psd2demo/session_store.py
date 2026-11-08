@@ -39,7 +39,7 @@ class SessionStore:
     def load(self) -> StoredSession | None:
         try:
             data = json.loads(self.path.read_text())
-            if data.pop("schema_version", None) != SCHEMA_VERSION:
+            if not isinstance(data, dict) or data.pop("schema_version", None) != SCHEMA_VERSION:
                 raise ValueError("unsupported schema_version")
             return StoredSession(**data)
         except FileNotFoundError:

@@ -52,9 +52,19 @@ def parse_callback(url: str, expected_state: str) -> str:
     return code
 
 
+def prompt_stderr(prompt: str) -> str:
+    """Like ``input()``, but the prompt always goes to stderr so stdout can carry --json output."""
+    sys.stderr.write(prompt)
+    sys.stderr.flush()
+    line = sys.stdin.readline()
+    if not line:
+        raise EOFError
+    return line.rstrip("\n")
+
+
 def capture_paste(timeout: int, prompt_fn: Callable[[str], str] | None = None) -> str:
     """Ask the user to paste the redirect URL; raise CallbackTimeout after ``timeout`` seconds."""
-    prompt_fn = prompt_fn or input
+    prompt_fn = prompt_fn or prompt_stderr
     result: list[str] = []
     error: list[BaseException] = []
 

@@ -40,9 +40,19 @@ def api(monkeypatch, tmp_path):
     respx.get(f"{BASE}/accounts/acc-uid-1/transactions").respond(json=load_fixture("transactions_p2.json"))
     opened = []
     monkeypatch.setattr("webbrowser.open", opened.append)
-    monkeypatch.setattr("builtins.input", lambda _: "https://localhost/callback?code=C1&state="
-                        + json.loads(auth.calls.last.request.content)["state"])
+    monkeypatch.setattr("sys.stdin", _PasteStdin(auth))
     return opened
+
+
+class _PasteStdin:
+    """stdin whose next line is the redirect URL carrying the state of the /auth request just made."""
+
+    def __init__(self, auth_route):
+        self.auth_route = auth_route
+
+    def readline(self):
+        state = json.loads(self.auth_route.calls.last.request.content)["state"]
+        return f"https://localhost/callback?code=C1&state={state}\n"
 
 
 @respx.mock
@@ -59,8 +69,9 @@ def test_run_json_and_export(tmp_path, key_file, api, capsys):
     export = tmp_path / "exports" / "run.json"
     assert cli.main(cli_args("run", key_file, "--json", "--export", str(export))) == 0
     captured = capsys.readouterr()
-    result = json.loads(captured.out)
+    result = json.loads(captured.out)  # stdout holds only the JSON document, not the paste prompt
     assert result["ok"] is True and result["failed_step"] is None
+    assert "Paste the full redirect URL" in captured.err and "tilisy.enablebanking.com" in captured.err
     assert [s["name"] for s in result["steps"]] == ["CONFIG", "BANK", "CONSENT", "ACCOUNT", "TRANSACTIONS",
                                                     "EXPORT"]
     assert result["summary"]["totals"]["USD"]["net"] == "-15.00"
