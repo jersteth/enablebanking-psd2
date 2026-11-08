@@ -8,6 +8,7 @@ import time
 import webbrowser
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
+import socketserver
 from typing import Callable
 from urllib.parse import parse_qs, urlparse
 
@@ -86,6 +87,15 @@ def capture_paste(timeout: int, prompt_fn: Callable[[str], str] | None = None) -
     return result[0]
 
 
+class _LoopbackServer(HTTPServer):
+    """HTTPServer without the ``socket.getfqdn()`` reverse-DNS lookup in ``server_bind``, which can stall for
+    seconds on macOS before the socket starts listening."""
+
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+
+
 def capture_listener(redirect_url: str, timeout: int) -> str:
     """Serve one request on 127.0.0.1 at the redirect URL's port/path; return the full callback URL."""
     target = urlparse(redirect_url)
@@ -108,7 +118,7 @@ def capture_listener(redirect_url: str, timeout: int) -> str:
             pass
 
     deadline = time.monotonic() + timeout
-    with HTTPServer(("127.0.0.1", target.port), Handler) as server:
+    with _LoopbackServer(("127.0.0.1", target.port), Handler) as server:
         while not captured:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
