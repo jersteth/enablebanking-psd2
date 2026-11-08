@@ -102,8 +102,8 @@ So:
 ## 5. Scheduling
 cron (daily at 07:00, plus a weekly consent check on Monday):
 ```cron
-0 7 * * *  cd /path/to/be-enablebanking-demo && .venv/bin/psd2-demo history --output exports/history.json; [ $? -le 3 ] || echo "history failed" | mail -s psd2 you@example.com
-0 9 * * 1  cd /path/to/be-enablebanking-demo && .venv/bin/psd2-demo authorize --status --json > exports/consents.json || echo "renew consents: psd2-demo authorize" | mail -s psd2 you@example.com
+0 7 * * *  cd /path/to/enablebanking-psd2 && .venv/bin/psd2-demo history --output exports/history.json; [ $? -le 3 ] || echo "history failed" | mail -s psd2 you@example.com
+0 9 * * 1  cd /path/to/enablebanking-psd2 && .venv/bin/psd2-demo authorize --status --json > exports/consents.json || echo "renew consents: psd2-demo authorize" | mail -s psd2 you@example.com
 ```
 
 systemd user timer:
@@ -111,8 +111,8 @@ systemd user timer:
 # ~/.config/systemd/user/psd2-history.service
 [Service]
 Type=oneshot
-WorkingDirectory=%h/dev/be-enablebanking-demo
-ExecStart=%h/dev/be-enablebanking-demo/.venv/bin/psd2-demo history --output exports/history.json
+WorkingDirectory=%h/dev/enablebanking-psd2
+ExecStart=%h/dev/enablebanking-psd2/.venv/bin/psd2-demo history --output exports/history.json
 SuccessExitStatus=3
 
 # ~/.config/systemd/user/psd2-history.timer

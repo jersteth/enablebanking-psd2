@@ -1,4 +1,4 @@
-# be-enablebanking-demo
+# enablebanking-psd2
 
 End-to-end PSD2 demo: read the last 10 days of transactions of **one Belgian personal account** through the [Enable Banking](https://enablebanking.com) API, in production restricted mode (your own linked accounts, no contract needed).
 

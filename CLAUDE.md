@@ -3,7 +3,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project
-`be-enablebanking-demo`: a test client for PSD2 account access (AIS) to Belgian personal bank accounts, using the Enable Banking API (enablebanking.com) as the aggregator. See `./specs/product.md`.
+`enablebanking-psd2`: a test client for PSD2 account access (AIS) to Belgian personal bank accounts, using the Enable Banking API (enablebanking.com) as the aggregator. See `./specs/product.md`.
 
 ## Commands
 ```bash

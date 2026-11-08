@@ -219,7 +219,7 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# --- be-enablebanking-demo ---
+# --- enablebanking-psd2 ---
 # Secrets and local state (never commit)
 config.toml
 *.pem
